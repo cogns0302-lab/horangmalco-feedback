@@ -2,3 +2,6 @@ data/
 .env
 __pycache__/
 *.pyc
+
+# 홍보 자료를 만들 때 생기는 중간 파일
+promo/**/build/
