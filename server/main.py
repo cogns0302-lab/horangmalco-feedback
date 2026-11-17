@@ -6,6 +6,7 @@ import hmac
 import json
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import time
@@ -13,14 +14,15 @@ import uuid
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import UploadFile      # request.form() 이 돌려주는 형(fastapi.UploadFile 은 그 하위 형이라 isinstance 가 거짓)
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config, db, jobs
-from .pipeline import knowledge, stt
+from . import config, db, jobs, roster
+from .pipeline import knowledge, problembank, stt
 from .pipeline.hwpx import REVIEW_MARK
 
 BASE = Path(__file__).resolve().parent
@@ -32,7 +34,10 @@ templates = Jinja2Templates(directory=BASE / "templates")
 
 MEDIA_EXT = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv", ".mp3", ".m4a", ".wav", ".aac", ".ogg", ".flac"}
 PROBLEM_EXT = {".png", ".jpg", ".jpeg", ".webp", ".pdf", ".hwp", ".hwpx", ".txt"}
-LEVELS = ["유특", "초특", "중특"]
+LEVELS = roster.LEVELS
+EXAMINEE_DIR = config.DATA_DIR / "examinees"
+# 담당 크루가 고칠 수 있는 칸(나머지는 관리자만)
+CREW_EDITABLE = ["round", "upload_date", "video_url", "note", "done_date", "personal"]
 
 
 # ── 비밀번호 ────────────────────────────────────────────────────────────────
@@ -65,9 +70,17 @@ def startup() -> None:
                 db.run("UPDATE users SET pw_hash=?, role='admin', status='approved' WHERE id=?",
                        hash_pw(config.ADMIN_PASSWORD), row["id"])
     jobs.start()
+    if config.SYNC_ON_START and knowledge_incomplete():
+        start_sync()                                  # 첫 배포 또는 문제 쪽 그림이 아직 없을 때: 드라이브에서 받아 온다
+
+
+def knowledge_incomplete() -> bool:
     st = knowledge.status()
-    if config.SYNC_ON_START and not any(st["examples"].values()) and not st["books"]:
-        start_sync()                                  # 첫 배포: 드라이브에서 학습 자료를 받아 온다
+    if not any(st["examples"].values()) and not st["books"]:
+        return True
+    books = config.KNOWLEDGE_DIR / "books"
+    return any(problembank.is_lesson_book(f.stem) and problembank.wanted_pages(f)
+               and not problembank.page_dir(f.stem).exists() for f in books.glob("*.txt"))
 
 
 _sync_proc: subprocess.Popen | None = None
@@ -161,6 +174,10 @@ def client_ip(request: Request) -> str:
             or (request.client.host if request.client else ""))
 
 
+def stt_names() -> dict:
+    return {k: v[0] for k, v in stt.PROVIDERS.items()}
+
+
 # ── 로그인 / 가입 ───────────────────────────────────────────────────────────
 @app.get("/robots.txt", response_class=PlainTextResponse)
 def robots():
@@ -188,7 +205,7 @@ def login(request: Request, email: str = Form(...), password: str = Form(...), c
     u = db.one("SELECT * FROM users WHERE email=?", email)
     if not u or not check_pw(password, u["pw_hash"]):
         db.run("INSERT INTO login_attempts(email,ip,at) VALUES(?,?,?)", email, ip, now)
-        return page(request, "login.html", error="이메일 또는 비밀번호가 올바르지 않습니다.")
+        return page(request, "login.html", error="아이디 또는 비밀번호가 올바르지 않습니다.")
     request.session.clear()
     request.session["uid"] = u["id"]
     return RedirectResponse("/", status_code=303)
@@ -196,26 +213,37 @@ def login(request: Request, email: str = Form(...), password: str = Form(...), c
 
 @app.get("/signup")
 def signup_form(request: Request):
-    return page(request, "signup.html")
+    return page(request, "signup.html", levels=LEVELS, form={})
 
 
 @app.post("/signup")
-def signup(request: Request, name: str = Form(...), email: str = Form(...), password: str = Form(...),
-           csrf: str = Form("")):
+def signup(request: Request, name: str = Form(""), nickname: str = Form(""), level: str = Form(""),
+           email: str = Form(""), password: str = Form(""), csrf: str = Form("")):
+    """크루 가입: 학교급 · 이름 · 닉네임 · 아이디 · 비밀번호. 관리자가 승인해야 로그인된다."""
     check_csrf(request, csrf)
-    name, email = name.strip()[:40], email.strip().lower()[:120]
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
-        return page(request, "signup.html", error="이메일 형식이 올바르지 않습니다.")
-    if len(password) < 8:
-        return page(request, "signup.html", error="비밀번호는 8자 이상이어야 합니다.")
+    name, nickname, email = name.strip()[:40], nickname.strip()[:40], email.strip().lower()[:60]
+    form = {"name": name, "nickname": nickname, "level": level, "email": email}
+
+    def fail(msg: str):
+        return page(request, "signup.html", levels=LEVELS, form=form, error=msg)
+
+    if level not in LEVELS:
+        return fail("학교급을 선택해 주세요.")
     if not name:
-        return page(request, "signup.html", error="이름을 입력해 주세요.")
-    if not db.one("SELECT 1 FROM users WHERE email=?", email):
-        is_admin = bool(config.ADMIN_EMAIL) and email == config.ADMIN_EMAIL and not config.ADMIN_PASSWORD
-        db.run("INSERT INTO users(email,name,pw_hash,role,status,created_at) VALUES(?,?,?,?,?,?)",
-               email, name, hash_pw(password), "admin" if is_admin else "member",
-               "approved" if is_admin else "pending", time.time())
-    # 이미 가입된 이메일이어도 같은 화면을 보여 준다(가입 여부 노출 방지)
+        return fail("이름을 입력해 주세요.")
+    if not nickname:
+        return fail("닉네임을 입력해 주세요.")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._@+-]{2,59}", email):
+        return fail("아이디는 영문 소문자·숫자로 3자 이상 입력해 주세요(. _ - @ 사용 가능).")
+    if len(password) < 8:
+        return fail("비밀번호는 8자 이상이어야 합니다.")
+    if db.one("SELECT 1 FROM users WHERE email=?", email):
+        return fail("이미 사용 중인 아이디입니다. 다른 아이디를 입력해 주세요.")
+    is_admin = bool(config.ADMIN_EMAIL) and email == config.ADMIN_EMAIL and not config.ADMIN_PASSWORD
+    ord_ = db.one("SELECT COALESCE(MAX(ord),0) m FROM users WHERE level=?", level)["m"] + 1
+    db.run("INSERT INTO users(email,name,nickname,level,ord,pw_hash,role,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+           email, name, nickname, level, ord_, hash_pw(password), "admin" if is_admin else "member",
+           "approved" if is_admin else "pending", time.time())
     return page(request, "pending.html", just_signed_up=True)
 
 
@@ -234,20 +262,36 @@ def logout(request: Request, csrf: str = Form("")):
     return RedirectResponse("/login", status_code=303)
 
 
-# ── 화면 ────────────────────────────────────────────────────────────────────
+# ── 작업(피드백) ────────────────────────────────────────────────────────────
+def _job_scope(u) -> tuple[str, tuple]:
+    """관리자는 모든 작업, 크루는 자기가 올린 작업과 자기 담당 수험생의 작업만 본다."""
+    if u["role"] == "admin":
+        return "1=1", ()
+    return "(j.user_id=? OR j.examinee_id IN (SELECT id FROM examinees WHERE crew_id=?))", (u["id"], u["id"])
+
+
+def _jobs(u, limit: int):
+    where, args = _job_scope(u)
+    return db.q(f"SELECT j.*, u.name uname FROM jobs j JOIN users u ON u.id=j.user_id WHERE {where} "
+                f"ORDER BY created_at DESC LIMIT {int(limit)}", *args)
+
+
 @app.get("/")
 def home(request: Request):
-    member(request)
-    recent = db.q("SELECT j.*, u.name uname FROM jobs j JOIN users u ON u.id=j.user_id ORDER BY created_at DESC LIMIT 5")
-    return page(request, "home.html", recent=recent)
+    u = member(request)
+    if u["role"] == "admin":
+        mine = db.one("SELECT COUNT(*) c, SUM(crew_id IS NULL AND crew_text='' AND done_date='') un FROM examinees")
+    else:
+        mine = db.one("SELECT COUNT(*) c, SUM(done_date='') un FROM examinees WHERE crew_id=?", u["id"])
+    return page(request, "home.html", recent=_jobs(u, 5), mine=mine)
 
 
 @app.get("/lesson/new")
 def lesson_new(request: Request):
-    member(request)
-    return page(request, "lesson_new.html", levels=LEVELS, stt=stt.available(),
-                stt_names={k: v[0] for k, v in stt.PROVIDERS.items()}, kb=knowledge.status(),
-                max_mb=config.MAX_UPLOAD_MB)
+    u = member(request)
+    return page(request, "lesson_new.html", levels=LEVELS, stt=stt.available(), stt_names=stt_names(),
+                kb=knowledge.status(), max_mb=config.MAX_UPLOAD_MB, instructors=problembank.INSTRUCTORS,
+                kinds=problembank.KINDS, default_level=u["level"] or "초특")
 
 
 @app.get("/interview/new")
@@ -258,17 +302,20 @@ def interview_new(request: Request):
 
 @app.get("/jobs")
 def job_list(request: Request):
-    member(request)
-    rows = db.q("SELECT j.*, u.name uname FROM jobs j JOIN users u ON u.id=j.user_id ORDER BY created_at DESC LIMIT 200")
-    return page(request, "jobs.html", jobs=rows)
+    u = member(request)
+    return page(request, "jobs.html", jobs=_jobs(u, 200))
 
 
-def _job_or_404(job_id: str) -> dict:
+def _job_or_404(job_id: str, u) -> dict:
     if not re.fullmatch(r"[0-9a-f]{32}", job_id):
         raise HTTPException(404)
     j = db.job(job_id)
     if not j:
         raise HTTPException(404, "작업을 찾을 수 없습니다.")
+    if u["role"] != "admin" and j["user_id"] != u["id"]:
+        e = db.one("SELECT crew_id FROM examinees WHERE id=?", j.get("examinee_id")) if j.get("examinee_id") else None
+        if not e or e["crew_id"] != u["id"]:
+            raise HTTPException(404, "작업을 찾을 수 없습니다.")
     return j
 
 
@@ -279,17 +326,17 @@ def _load(job_id: str, name: str):
 
 @app.get("/jobs/{job_id}")
 def job_page(request: Request, job_id: str):
-    member(request)
-    j = _job_or_404(job_id)
+    u = member(request)
+    j = _job_or_404(job_id, u)
     return page(request, "job.html", job=j, fb=_load(job_id, "feedback.json"),
                 transcript=_load(job_id, "transcript.json"), stats=_load(job_id, "stats.json"),
-                stt_names={k: v[0] for k, v in stt.PROVIDERS.items()}, review_mark=REVIEW_MARK)
+                stt_names=stt_names(), review_mark=REVIEW_MARK, bank=problembank.get(j["meta"].get("problem_id")))
 
 
 @app.get("/api/jobs/{job_id}")
 def job_status(request: Request, job_id: str):
-    member(request)
-    j = _job_or_404(job_id)
+    u = member(request)
+    j = _job_or_404(job_id, u)
     return {k: j[k] for k in ("status", "step", "progress", "error")}
 
 
@@ -301,8 +348,8 @@ def _download_name(j: dict, suffix: str) -> str:
 
 @app.get("/jobs/{job_id}/download/{what}")
 def download(request: Request, job_id: str, what: str):
-    member(request)
-    j = _job_or_404(job_id)
+    u = member(request)
+    j = _job_or_404(job_id, u)
     files = {"hwpx": ("feedback.hwpx", ".hwpx", "application/hwp+zip"),
              "transcript": ("transcript.txt", " 전사문.txt", "text/plain; charset=utf-8"),
              "json": ("feedback.json", ".json", "application/json")}
@@ -319,9 +366,9 @@ def download(request: Request, job_id: str, what: str):
 
 @app.post("/jobs/{job_id}/regenerate")
 def regenerate(request: Request, job_id: str, what: str = Form("feedback"), csrf: str = Form("")):
-    member(request)
+    u = member(request)
     check_csrf(request, csrf)
-    j = _job_or_404(job_id)
+    j = _job_or_404(job_id, u)
     if j["status"] in ("queued", "running"):
         raise HTTPException(409, "이미 처리 중입니다.")
     jobs.regenerate(job_id, "all" if what == "all" else "feedback")
@@ -332,7 +379,7 @@ def regenerate(request: Request, job_id: str, what: str = Form("feedback"), csrf
 def job_delete(request: Request, job_id: str, csrf: str = Form("")):
     u = member(request)
     check_csrf(request, csrf)
-    j = _job_or_404(job_id)
+    j = _job_or_404(job_id, u)
     if u["role"] != "admin" and j["user_id"] != u["id"]:
         raise HTTPException(403, "본인이 올린 작업만 삭제할 수 있습니다.")
     if j["status"] == "running":
@@ -385,6 +432,79 @@ async def upload_chunk(request: Request, upload_id: str, index: int):
     return {"next": info["next"], "received": info["received"], "done": info["received"] == info["size"]}
 
 
+async def _save_problem_files(files: list, dst: Path, start: int = 0, limit: int = 8) -> int:
+    """올린 문제 파일(사진·PDF·한글)을 검사해 dst 에 번호 붙여 저장한다."""
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for pf in files[:limit]:
+        ext = Path(pf.filename).suffix.lower()
+        if ext not in PROBLEM_EXT:
+            raise HTTPException(400, f"문제 파일 형식을 지원하지 않습니다({ext}).")
+        data = await pf.read()
+        if len(data) > 25 * 1024 * 1024:
+            raise HTTPException(400, "문제 파일은 25MB 이하여야 합니다.")
+        (dst / f"{start + n:02d}{ext}").write_bytes(data)
+        n += 1
+    return n
+
+
+async def _start_lesson_job(u, form, *, meta: dict, examinee_id: int | None = None,
+                            saved_files: list[Path] = ()) -> str:
+    """수업실연 피드백 작업을 만든다. 문제는 ① 문제 은행에서 고른 것 ② 올린 파일 ③ 붙여넣은 글 중 하나 이상."""
+    def f(k: str, n: int = 200) -> str:
+        return str(form.get(k) or "").strip()[:n]
+
+    upload_id, video_url = f("upload_id"), f("video_url", 500) or meta.get("video_url", "")
+    problem_text = f("problem_text", 30000)
+    bank = problembank.get(f("problem_id")) if f("problem_mode", 10) != "upload" else None
+    prob_files = [x for x in form.getlist("problem_files") if isinstance(x, UploadFile) and x.filename]
+    saved_files = list(saved_files) if not bank else []
+    if not bank and not problem_text and not prob_files and not saved_files:
+        raise HTTPException(400, "문제를 고르거나, 문제 파일을 올리거나, 문제를 붙여넣어 주세요.")
+    if video_url and not re.match(r"https://", video_url):
+        raise HTTPException(400, "영상 링크는 https:// 로 시작해야 합니다.")
+    if not upload_id and not video_url:
+        raise HTTPException(400, "영상 파일을 올리거나 영상 링크를 입력해 주세요.")
+
+    job_id = uuid.uuid4().hex
+    d = jobs.job_dir(job_id)
+    try:
+        if upload_id:
+            if not re.fullmatch(r"[0-9a-f]{32}", upload_id):
+                raise HTTPException(400, "업로드 정보가 올바르지 않습니다.")
+            up = config.UPLOAD_DIR / upload_id
+            info = json.loads((up / "info.json").read_text()) if (up / "info.json").exists() else None
+            if not info or info["received"] != info["size"]:
+                raise HTTPException(400, "영상 업로드가 끝나지 않았습니다.")
+            (up / ("source" + info["ext"])).replace(d / ("source" + info["ext"]))
+            (up / "info.json").unlink()
+            up.rmdir()
+            video_url = ""
+        n = 0
+        for src in saved_files[:8]:                   # 수험생 기록에 저장해 둔 문제 파일
+            (d / "problem").mkdir(exist_ok=True)
+            shutil.copyfile(src, d / "problem" / f"{n:02d}{src.suffix.lower()}")
+            n += 1
+        await _save_problem_files(prob_files, d / "problem", start=n, limit=8 - n)
+    except Exception:
+        shutil.rmtree(d, ignore_errors=True)
+        raise
+
+    title_in = f("problem_title", 80)
+    meta = dict(meta)
+    meta.update(problem_text=problem_text, video_url=video_url,
+                problem_id=bank["id"] if bank else "",
+                problem_title=title_in or (f"{bank['instructor']} {bank['title']}" if bank else "") or "문제")
+    title = f"{meta.get('region', '')}{meta['level']} {meta.get('customer', '')} — {meta['problem_title']}".strip(" —")
+    now = time.time()
+    db.run("INSERT INTO jobs(id,kind,user_id,title,status,step,meta,examinee_id,created_at,updated_at) "
+           "VALUES(?,?,?,?,?,?,?,?,?,?)",
+           job_id, "lesson", u["id"], title or "수업실연 피드백", "queued", "대기 중",
+           json.dumps(meta, ensure_ascii=False), examinee_id, now, now)
+    jobs.enqueue(job_id)
+    return job_id
+
+
 @app.post("/lesson")
 async def lesson_create(request: Request):
     u = member(request)
@@ -397,58 +517,271 @@ async def lesson_create(request: Request):
     level = f("level")
     if level not in LEVELS:
         raise HTTPException(400, "학교급을 선택해 주세요.")
-    upload_id, video_url = f("upload_id"), f("video_url", 500)
-    problem_text = f("problem_text", 30000)
-    prob_files = [x for x in form.getlist("problem_files") if isinstance(x, UploadFile) and x.filename]
-    if not problem_text and not prob_files:
-        raise HTTPException(400, "문제를 붙여넣거나 문제 파일을 올려 주세요.")
-    if video_url and not re.match(r"https://", video_url):
-        raise HTTPException(400, "영상 링크는 https:// 로 시작해야 합니다.")
-
-    job_id = uuid.uuid4().hex
-    d = jobs.job_dir(job_id)
-    if upload_id:
-        if not re.fullmatch(r"[0-9a-f]{32}", upload_id):
-            raise HTTPException(400, "업로드 정보가 올바르지 않습니다.")
-        up = config.UPLOAD_DIR / upload_id
-        info = json.loads((up / "info.json").read_text()) if (up / "info.json").exists() else None
-        if not info or info["received"] != info["size"]:
-            raise HTTPException(400, "영상 업로드가 끝나지 않았습니다.")
-        (up / ("source" + info["ext"])).replace(d / ("source" + info["ext"]))
-        (up / "info.json").unlink()
-        up.rmdir()
-    elif not video_url:
-        raise HTTPException(400, "영상 파일을 올리거나 영상 링크를 입력해 주세요.")
-
-    (d / "problem").mkdir(exist_ok=True)
-    for i, pf in enumerate(prob_files[:8]):
-        ext = Path(pf.filename).suffix.lower()
-        if ext not in PROBLEM_EXT:
-            raise HTTPException(400, f"문제 파일 형식을 지원하지 않습니다({ext}).")
-        data = await pf.read()
-        if len(data) > 25 * 1024 * 1024:
-            raise HTTPException(400, "문제 파일은 25MB 이하여야 합니다.")
-        (d / "problem" / f"{i:02d}{ext}").write_bytes(data)
-
     meta = {"level": level, "customer": f("customer", 40), "region": f("region", 20), "score": f("score", 60),
-            "round": f("round", 20), "problem_title": f("problem_title", 80), "request": f("request", 2000),
-            "problem_text": problem_text, "video_url": video_url}
-    title = f"{meta['region']}{level} {meta['customer']} — {meta['problem_title']}".strip(" —")
-    now = time.time()
-    db.run("INSERT INTO jobs(id,kind,user_id,title,status,step,meta,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-           job_id, "lesson", u["id"], title or "수업실연 피드백", "queued", "대기 중",
-           json.dumps(meta, ensure_ascii=False), now, now)
-    jobs.enqueue(job_id)
+            "round": f("round", 20), "request": f("request", 2000)}
+    job_id = await _start_lesson_job(u, form, meta=meta)
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 
-# ── 관리자: 회원 승인 ───────────────────────────────────────────────────────
+# ── 문제 은행 ───────────────────────────────────────────────────────────────
+def _problem_row(p: dict) -> dict:
+    return {"id": p["id"], "title": p["title"], "instructor": p["instructor"], "level": p["level"], "kind": p["kind"],
+            "book": p["book"], "pages": p["pages"], "has_image": bool(problembank.page_image(p["book"], p["pages"][0]))}
+
+
+@app.get("/api/problems")
+def api_problems(request: Request, level: str = "", instructor: str = "", kind: str = ""):
+    member(request)
+    return [_problem_row(p) for p in problembank.search(level, instructor, kind)]
+
+
+@app.get("/problems")
+def problems_page(request: Request, level: str = "", instructor: str = "", kind: str = ""):
+    u = member(request)
+    level = level if level in LEVELS else (u["level"] or "초특")
+    instructor = instructor if instructor in problembank.INSTRUCTORS else problembank.INSTRUCTORS[0]
+    kind = kind if kind in problembank.KINDS else problembank.KINDS[0]
+    return page(request, "problems.html", levels=LEVELS, instructors=problembank.INSTRUCTORS, kinds=problembank.KINDS,
+                level=level, instructor=instructor, kind=kind, counts=problembank.counts(),
+                problems=[_problem_row(p) for p in problembank.search(level, instructor, kind)])
+
+
+def _problem_or_404(pid: str) -> dict:
+    p = problembank.get(pid) if re.fullmatch(r"[0-9a-f]{12}", pid) else None
+    if not p:
+        raise HTTPException(404, "문제를 찾을 수 없습니다.")
+    return p
+
+
+@app.get("/problems/{pid}")
+def problem_page(request: Request, pid: str):
+    member(request)
+    p = _problem_or_404(pid)
+    pages = [{"n": n, "img": bool(problembank.page_image(p["book"], n))} for n in p["pages"]]
+    refs = [{"n": n, "img": bool(problembank.page_image(p["book"], n))} for n in p["ref_pages"]]
+    return page(request, "problem.html", p=p, pages=pages, refs=refs, siblings=problembank.siblings(p))
+
+
+@app.get("/problems/{pid}/page/{n}")
+def problem_page_image(request: Request, pid: str, n: int):
+    member(request)
+    p = _problem_or_404(pid)
+    img = problembank.page_image(p["book"], n) if n in p["pages"] + p["ref_pages"] else None
+    if not img:
+        raise HTTPException(404)
+    return FileResponse(img, media_type="image/jpeg")
+
+
+# ── 수험생 ──────────────────────────────────────────────────────────────────
+def _examinee(request: Request, eid: int):
+    """관리자는 모든 수험생, 크루는 자기에게 배정된 수험생만."""
+    u = member(request)
+    e = db.one("SELECT e.*, u.name crew_name, u.nickname crew_nick FROM examinees e "
+               "LEFT JOIN users u ON u.id=e.crew_id WHERE e.id=?", eid)
+    if not e or (u["role"] != "admin" and e["crew_id"] != u["id"]):
+        raise HTTPException(404, "수험생을 찾을 수 없습니다.")
+    return u, e
+
+
+def _examinee_files(eid: int) -> list[Path]:
+    d = EXAMINEE_DIR / str(eid) / "problem"
+    return sorted(d.glob("*")) if d.exists() else []
+
+
+@app.get("/examinees")
+def examinee_list(request: Request, level: str = "", view: str = ""):
+    u = member(request)
+    where, args = ["1=1"], []
+    if u["role"] != "admin":
+        where.append("e.crew_id=?")
+        args.append(u["id"])
+    if level in LEVELS:
+        where.append("e.level=?")
+        args.append(level)
+    if view == "todo":
+        where.append("e.done_date=''")
+    rows = db.q(
+        "SELECT e.*, u.name crew_name, u.nickname crew_nick, "
+        "(SELECT j.id FROM jobs j WHERE j.examinee_id=e.id ORDER BY j.created_at DESC LIMIT 1) job_id, "
+        "(SELECT j.status FROM jobs j WHERE j.examinee_id=e.id ORDER BY j.created_at DESC LIMIT 1) job_status "
+        "FROM examinees e LEFT JOIN users u ON u.id=e.crew_id WHERE " + " AND ".join(where) +
+        " ORDER BY CASE e.level WHEN '유특' THEN 0 WHEN '초특' THEN 1 ELSE 2 END, e.seq, e.id", *args)
+    groups = [(lv, [r for r in rows if r["level"] == lv]) for lv in LEVELS]
+    return page(request, "examinees.html", groups=[g for g in groups if g[1] or (u["role"] == "admin" and not level)],
+                levels=LEVELS, level=level, view=view, total=len(rows))
+
+
+@app.post("/examinees")
+def examinee_create(request: Request, level: str = Form(""), name: str = Form(""), csrf: str = Form("")):
+    admin(request)
+    check_csrf(request, csrf)
+    if level not in LEVELS or not name.strip():
+        raise HTTPException(400, "학교급과 이름을 입력해 주세요.")
+    now = time.time()
+    seq = db.one("SELECT COALESCE(MAX(seq),0) m FROM examinees WHERE level=?", level)["m"] + 1
+    eid = db.run("INSERT INTO examinees(level,seq,name,source,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                 level, seq, name.strip()[:40], "manual", now, now)
+    roster.assign_unassigned(level)
+    return RedirectResponse(f"/examinees/{eid}", status_code=303)
+
+
+@app.get("/examinees/{eid}")
+def examinee_page(request: Request, eid: int):
+    u, e = _examinee(request, eid)
+    ejobs = db.q("SELECT j.*, u.name uname FROM jobs j JOIN users u ON u.id=j.user_id WHERE j.examinee_id=? "
+                 "ORDER BY created_at DESC", eid)
+    crew = db.q("SELECT id, name, nickname, level FROM users WHERE status='approved' AND level!='' "
+                "ORDER BY level=? DESC, level, ord, id", e["level"]) if u["role"] == "admin" else []
+    return page(request, "examinee.html", e=e, jobs=ejobs, crew=crew, levels=LEVELS, fields=roster.FIELDS,
+                files=[{"name": p.name, "ext": p.suffix[1:]} for p in _examinee_files(eid)],
+                bank=problembank.get(e["problem_id"]), saved=bool(request.query_params.get("saved")),
+                skip_fields=("seq", "crew", "request", "note", "video_url"),
+                instructors=problembank.INSTRUCTORS, kinds=problembank.KINDS, stt=stt.available(),
+                stt_names=stt_names(), max_mb=config.MAX_UPLOAD_MB, crew_editable=CREW_EDITABLE)
+
+
+@app.post("/examinees/{eid}")
+async def examinee_save(request: Request, eid: int):
+    u, e = _examinee(request, eid)
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    limits = {"request": 2000, "note": 1000, "video_url": 500}
+    cols = roster.TEXT_COLS if u["role"] == "admin" else CREW_EDITABLE
+    vals = {k: str(form.get(k) or "").strip()[:limits.get(k, 120)] for k in cols if k in form}
+    if vals.get("video_url") and not vals["video_url"].startswith("https://"):
+        raise HTTPException(400, "영상 링크는 https:// 로 시작해야 합니다.")
+    if u["role"] == "admin":
+        if form.get("level") in LEVELS:
+            vals["level"] = form.get("level")
+        if str(form.get("seq") or "").isdigit():
+            vals["seq"] = int(form.get("seq"))
+        if "crew_id" in form:
+            cid = str(form.get("crew_id") or "")
+            vals["crew_id"] = int(cid) if cid.isdigit() and db.one("SELECT 1 FROM users WHERE id=?", int(cid)) else None
+            if vals["crew_id"]:
+                vals["crew_text"] = ""
+    if vals:
+        vals["updated_at"] = time.time()
+        db.run("UPDATE examinees SET " + ", ".join(f"{k}=?" for k in vals) + " WHERE id=?", *vals.values(), eid)
+    return RedirectResponse(f"/examinees/{eid}?saved=1", status_code=303)
+
+
+@app.post("/examinees/{eid}/delete")
+def examinee_delete(request: Request, eid: int, csrf: str = Form("")):
+    admin(request)
+    check_csrf(request, csrf)
+    if db.one("SELECT 1 FROM jobs WHERE examinee_id=?", eid):
+        db.run("UPDATE jobs SET examinee_id=NULL WHERE examinee_id=?", eid)    # 피드백 작업은 작업 목록에 남긴다
+    db.run("DELETE FROM examinees WHERE id=?", eid)
+    shutil.rmtree(EXAMINEE_DIR / str(eid), ignore_errors=True)
+    return RedirectResponse("/examinees", status_code=303)
+
+
+@app.post("/examinees/{eid}/files")
+async def examinee_files_add(request: Request, eid: int):
+    """수험생이 보낸 문제(사진·PDF 등)를 수험생 기록에 붙여 둔다."""
+    _examinee(request, eid)
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    files = [x for x in form.getlist("problem_files") if isinstance(x, UploadFile) and x.filename]
+    have = _examinee_files(eid)
+    start = max([int(p.stem) for p in have if p.stem.isdigit()] + [-1]) + 1
+    await _save_problem_files(files, EXAMINEE_DIR / str(eid) / "problem", start=start, limit=max(0, 12 - len(have)))
+    return RedirectResponse(f"/examinees/{eid}#problem", status_code=303)
+
+
+def _examinee_file(eid: int, name: str) -> Path:
+    if not re.fullmatch(r"\d{2}\.[a-z0-9]{2,5}", name):
+        raise HTTPException(404)
+    p = EXAMINEE_DIR / str(eid) / "problem" / name
+    if not p.exists():
+        raise HTTPException(404)
+    return p
+
+
+@app.get("/examinees/{eid}/files/{name}")
+def examinee_file(request: Request, eid: int, name: str):
+    _examinee(request, eid)
+    p = _examinee_file(eid, name)
+    inline = p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".pdf", ".txt")
+    return FileResponse(p, headers={"Content-Disposition": f"{'inline' if inline else 'attachment'}; filename=\"{name}\""})
+
+
+@app.post("/examinees/{eid}/files/{name}/delete")
+def examinee_file_delete(request: Request, eid: int, name: str, csrf: str = Form("")):
+    _examinee(request, eid)
+    check_csrf(request, csrf)
+    _examinee_file(eid, name).unlink()
+    return RedirectResponse(f"/examinees/{eid}#problem", status_code=303)
+
+
+@app.post("/examinees/{eid}/feedback")
+async def examinee_feedback(request: Request, eid: int):
+    """수험생 기록에서 바로 피드백을 시작한다(문제는 크루가 직접 고른다)."""
+    u, e = _examinee(request, eid)
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    meta = {"level": e["level"], "customer": e["name"], "region": e["region"], "score": e["score"],
+            "round": e["round"], "request": e["request"], "video_url": e["video_url"]}
+    job_id = await _start_lesson_job(u, form, meta=meta, examinee_id=eid, saved_files=_examinee_files(eid))
+    j = db.job(job_id)
+    db.run("UPDATE examinees SET problem_id=?, problem_title=?, video_url=?, updated_at=? WHERE id=?",
+           j["meta"]["problem_id"], j["meta"]["problem_title"], j["meta"]["video_url"] or e["video_url"],
+           time.time(), eid)
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+# ── 관리자: 명단 가져오기 · 크루 ────────────────────────────────────────────
+@app.get("/admin/import")
+def import_form(request: Request):
+    admin(request)
+    return page(request, "import.html", levels=LEVELS, result=None,
+                crew={lv: roster.crew(lv) for lv in LEVELS})
+
+
+@app.post("/admin/import")
+async def import_run(request: Request):
+    admin(request)
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    up = form.get("file")
+    ctx = dict(levels=LEVELS, crew={lv: roster.crew(lv) for lv in LEVELS})
+    if not isinstance(up, UploadFile) or not up.filename:
+        return page(request, "import.html", result=None, error="파일을 선택해 주세요.", **ctx)
+    data = await up.read()
+    if len(data) > 20 * 1024 * 1024:
+        return page(request, "import.html", result=None, error="파일은 20MB 이하여야 합니다.", **ctx)
+    default_level = form.get("level") if form.get("level") in LEVELS else ""
+    try:
+        rows, notes = roster.parse(roster.read_tables(data, up.filename), default_level)
+    except Exception as ex:
+        return page(request, "import.html", result=None, error=f"파일을 읽지 못했습니다: {ex}", **ctx)
+    result = roster.import_rows(rows)
+    result.update(notes=notes, filename=up.filename, rows=len(rows))
+    return page(request, "import.html", result=result, **ctx)
+
+
+@app.post("/admin/assign")
+def admin_assign(request: Request, csrf: str = Form("")):
+    admin(request)
+    check_csrf(request, csrf)
+    roster.assign_unassigned()
+    return RedirectResponse("/examinees", status_code=303)
+
+
 @app.get("/admin/users")
 def admin_users(request: Request):
     admin(request)
-    return page(request, "admin_users.html", users=db.q("SELECT * FROM users ORDER BY status='pending' DESC, created_at DESC"),
-                kb=knowledge.status(), sync=sync_state(), stt=stt.available(),
-                stt_names={k: v[0] for k, v in stt.PROVIDERS.items()},
+    users = db.q("SELECT u.*, (SELECT COUNT(*) FROM examinees e WHERE e.crew_id=u.id) n_all, "
+                 "(SELECT COUNT(*) FROM examinees e WHERE e.crew_id=u.id AND e.done_date='') n_todo "
+                 "FROM users u ORDER BY status='pending' DESC, ord, id")
+    groups = [(lv, [x for x in users if x["level"] == lv]) for lv in LEVELS]
+    groups.append(("학교급 없음", [x for x in users if x["level"] not in LEVELS]))
+    return page(request, "admin_users.html", groups=groups, levels=LEVELS,
+                next_up={lv: db.setting(f"rr:{lv}") for lv in LEVELS},
+                kb=knowledge.status(), sync=sync_state(), stt=stt.available(), stt_names=stt_names(),
+                bank=problembank.counts(),
+                page_images=sum(1 for _ in (config.KNOWLEDGE_DIR / "pages").glob("*/*.jpg")),
                 ai_key=bool(config.env("ANTHROPIC_API_KEY") or config.env("ANTHROPIC_AUTH_TOKEN")))
 
 
@@ -457,6 +790,19 @@ def admin_sync(request: Request, csrf: str = Form("")):
     admin(request)
     check_csrf(request, csrf)
     start_sync()
+    return RedirectResponse("/admin/users", status_code=303)
+
+
+@app.post("/admin/users/{user_id}/update")
+def admin_user_update(request: Request, user_id: int, name: str = Form(""), nickname: str = Form(""),
+                      level: str = Form(""), ord: str = Form(""), csrf: str = Form("")):
+    admin(request)
+    check_csrf(request, csrf)
+    if not db.one("SELECT 1 FROM users WHERE id=?", user_id):
+        raise HTTPException(404)
+    db.run("UPDATE users SET name=?, nickname=?, level=?, ord=? WHERE id=?",
+           name.strip()[:40] or "이름 없음", nickname.strip()[:40], level if level in LEVELS else "",
+           int(ord) if ord.strip().isdigit() else 0, user_id)
     return RedirectResponse("/admin/users", status_code=303)
 
 
@@ -471,8 +817,8 @@ def admin_user_action(request: Request, user_id: int, action: str, csrf: str = F
     elif action == "block":
         db.run("UPDATE users SET status='blocked' WHERE id=?", user_id)
     elif action == "delete":
-        if db.one("SELECT 1 FROM jobs WHERE user_id=?", user_id):
-            db.run("UPDATE users SET status='blocked' WHERE id=?", user_id)   # 작업 이력이 있으면 차단만
+        if db.one("SELECT 1 FROM jobs WHERE user_id=?", user_id) or db.one("SELECT 1 FROM examinees WHERE crew_id=?", user_id):
+            db.run("UPDATE users SET status='blocked' WHERE id=?", user_id)   # 작업·담당 이력이 있으면 차단만
         else:
             db.run("DELETE FROM users WHERE id=?", user_id)
     else:

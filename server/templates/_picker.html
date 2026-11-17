@@ -1,0 +1,25 @@
+{# 문제 고르기: 강사(박해인·서진) → 기출/예상 → 문제. 외부·새 문제는 '문제 업로드'. app.js 가 목록을 채운다. #}
+<div class="picker" id="picker" data-level="{{ picker_level or '' }}" data-selected="{{ picker_selected or '' }}">
+  <input type="hidden" name="problem_mode" id="pb-mode" value="bank">
+  <div class="seg" id="pb-instructor" role="group" aria-label="강사">
+    {% for name in instructors %}<button type="button" class="seg-btn" data-instructor="{{ name }}">{{ name }}</button>{% endfor %}
+    <button type="button" class="seg-btn" data-upload="1">문제 업로드</button>
+  </div>
+  <div id="pb-bank" hidden>
+    <div class="seg" id="pb-kind" role="group" aria-label="문제 유형">
+      {% for k in kinds %}<button type="button" class="seg-btn" data-kind="{{ k }}">{{ k }} 문제</button>{% endfor %}
+    </div>
+    <label>문제 선택 <small id="pb-count"></small>
+      <select name="problem_id" id="pb-problem"><option value="">강사와 유형을 먼저 누르세요</option></select>
+    </label>
+    <p class="muted"><a id="pb-preview" href="#" target="_blank" rel="noopener" hidden>고른 문제 보기 ↗</a></p>
+  </div>
+  <div id="pb-upload" hidden>
+    <p class="muted">강사 책에 없는 외부 문제나 새 문제일 때 씁니다.</p>
+    <label>문제 이름<input name="problem_title" maxlength="80" placeholder="예: 스터디 자작 문제(국어)"></label>
+    <label>문제 파일 <small>사진·PDF·한글(hwp/hwpx) — 여러 개 가능</small>
+      <input type="file" name="problem_files" multiple accept=".png,.jpg,.jpeg,.webp,.pdf,.hwp,.hwpx,.txt"></label>
+    <label>또는 문제 붙여넣기 <small>조건·학생 실태까지 전부</small>
+      <textarea name="problem_text" rows="5" maxlength="30000" placeholder="본시 학습 지도 내용, 수험생 유의 사항, 학생 실태를 그대로 붙여넣으세요."></textarea></label>
+  </div>
+</div>

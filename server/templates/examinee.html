@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ e.name }} · {{ e.level }}{% endblock %}
+{% block main_class %}mid{% endblock %}
+{% block body %}
+<p><a href="/examinees?level={{ e.level }}">← 수험생 목록</a></p>
+<div class="row-head">
+  <h1>{{ e.name }} <small class="muted">{{ e.level }} · 연번 {{ e.seq }}</small></h1>
+  <span>담당 {% if e.crew_id %}<span class="tag ok">{{ e.crew_nick or e.crew_name }}</span>{% elif e.crew_text %}<span class="tag">{{ e.crew_text }}</span>{% else %}<span class="tag bad">미배정</span>{% endif %}</span>
+</div>
+{% if saved %}<p class="alert okay">저장했습니다.</p>{% endif %}
+
+{% set is_admin = user.role == 'admin' %}
+<form class="card" method="post" action="/examinees/{{ e.id }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <h2>수험생 정보</h2>
+  {% if not is_admin %}<p class="muted">회수 · 영상 업로드 날짜 · 영상링크 · 비고 · 완료일자 · 개인일정은 직접 고칠 수 있습니다. 나머지는 관리자만 고칩니다.</p>{% endif %}
+  <div class="grid">
+    {% if is_admin %}
+    <label>학교급<select name="level">{% for lv in levels %}<option value="{{ lv }}" {% if lv == e.level %}selected{% endif %}>{{ lv }}</option>{% endfor %}</select></label>
+    <label>연번<input name="seq" inputmode="numeric" value="{{ e.seq }}"></label>
+    <label>담당자
+      <select name="crew_id">
+        <option value="">미배정{% if e.crew_text %} (시트: {{ e.crew_text }}){% endif %}</option>
+        {% for c in crew %}<option value="{{ c.id }}" {% if c.id == e.crew_id %}selected{% endif %}>{{ c.level }} · {{ c.nickname or c.name }}{% if c.nickname and c.nickname != c.name %} ({{ c.name }}){% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    {% for key, label in fields %}{% if key not in skip_fields %}
+    <label>{{ label }}<input name="{{ key }}" value="{{ e[key] }}" maxlength="120" {% if not is_admin and key not in crew_editable %}disabled{% endif %}></label>
+    {% endif %}{% endfor %}
+  </div>
+  <label>영상링크<input name="video_url" value="{{ e.video_url }}" maxlength="500" placeholder="https://www.youtube.com/watch?v=..."></label>
+  <label>요구사항<textarea name="request" rows="3" maxlength="2000" {% if not is_admin %}disabled{% endif %}>{{ e.request }}</textarea></label>
+  <label>비고<textarea name="note" rows="2" maxlength="1000">{{ e.note }}</textarea></label>
+  <button class="btn primary">저장</button>
+</form>
+
+<section class="card" id="problem">
+  <h2>수험생이 보낸 문제</h2>
+  <p class="muted">수험생이 메일로 보낸 문제 사진·파일을 여기에 붙여 둡니다. 화질이 나빠 읽기 어려운 경우가 많으니, 아래에서 <b>강사 책의 같은 문제를 직접 골라</b> 피드백하세요. 책에 없는 문제일 때만 이 파일로 피드백합니다.</p>
+  {% if files %}
+  <ul class="plain files">
+    {% for f in files %}
+    <li><a href="/examinees/{{ e.id }}/files/{{ f.name }}" target="_blank" rel="noopener">문제 파일 {{ loop.index }} ({{ f.ext }}) ↗</a>
+      <form method="post" action="/examinees/{{ e.id }}/files/{{ f.name }}/delete" data-confirm="이 파일을 지울까요?"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link danger">삭제</button></form></li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">아직 올라온 문제 파일이 없습니다.</p>{% endif %}
+  <form class="inline-form" method="post" action="/examinees/{{ e.id }}/files" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>문제 파일 추가<input type="file" name="problem_files" multiple required accept=".png,.jpg,.jpeg,.webp,.pdf,.hwp,.hwpx,.txt"></label>
+    <button class="btn">올리기</button>
+  </form>
+</section>
+
+<form class="card" id="lesson-form" method="post" action="/examinees/{{ e.id }}/feedback" enctype="multipart/form-data" data-csrf="{{ csrf }}" data-saved-files="{{ files|length }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="upload_id" id="upload_id">
+  <h2>피드백 시작</h2>
+  {% if not stt %}<p class="alert">음성 인식(STT) API 키가 아직 설정되지 않았습니다.</p>{% endif %}
+  <h3>1. 문제 고르기</h3>
+  {% if bank %}<p class="muted">지난번에 고른 문제: <a href="/problems/{{ bank.id }}" target="_blank" rel="noopener">{{ bank.instructor }} {{ bank.title }} ↗</a></p>{% endif %}
+  {% set picker_level = e.level %}{% set picker_selected = e.problem_id %}
+  {% include "_picker.html" %}
+  {% if files %}<p class="muted">문제 업로드를 고르면 위에 붙여 둔 수험생 문제 파일 {{ files|length }}개가 함께 쓰입니다.</p>{% endif %}
+  <h3>2. 수업실연 영상</h3>
+  {% set video_url = e.video_url %}
+  {% include "_video.html" %}
+  <p id="form-error" class="alert" hidden></p>
+  <button class="btn primary big" id="start-btn">피드백 시작</button>
+</form>
+
+{% if jobs %}
+<section class="card">
+  <h2>이 수험생의 피드백 작업</h2>
+  {% include "_job_rows.html" %}
+</section>
+{% endif %}
+
+{% if is_admin %}
+<form method="post" action="/examinees/{{ e.id }}/delete" data-confirm="{{ e.name }} 수험생을 명단에서 지울까요? 피드백 작업은 작업 목록에 남습니다.">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small danger">명단에서 삭제</button>
+</form>
+{% endif %}
+{% endblock %}

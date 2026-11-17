@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ p.title }}{% endblock %}
+{% block main_class %}mid{% endblock %}
+{% block body %}
+<p><a href="/problems?level={{ p.level }}&instructor={{ p.instructor }}&kind={{ p.kind }}">← 문제 은행</a></p>
+<h1>{{ p.title }}</h1>
+<p class="meta-line"><span class="tag">{{ p.instructor }}</span> <span class="tag">{{ p.level }}</span> <span class="tag">{{ p.kind }}</span> · {{ p.book }} p.{{ p.pages[0] }}{% if p.pages|length > 1 %}~{{ p.pages[-1] }}{% endif %}</p>
+{% if p.pages|length > 1 %}<p class="muted">문제 뒤에 이어지는 해설·후기·다음 문제의 앞부분이 함께 보일 수 있습니다.</p>{% endif %}
+{% for pg in pages %}
+  {% if pg.img %}<img class="page" src="/problems/{{ p.id }}/page/{{ pg.n }}" alt="{{ p.book }} {{ pg.n }}쪽" loading="lazy">{% endif %}
+{% endfor %}
+{% if not pages[0].img %}
+<div class="card"><p class="muted">쪽 그림이 아직 없어 글자 인식 텍스트를 보여 줍니다(오자가 섞여 있습니다).</p><p class="pre">{{ p.text }}</p></div>
+{% endif %}
+{% if refs %}
+<h2 class="section">같은 문제의 예시 답안</h2>
+{% for pg in refs %}{% if pg.img %}<img class="page" src="/problems/{{ p.id }}/page/{{ pg.n }}" alt="{{ p.book }} {{ pg.n }}쪽" loading="lazy">{% endif %}{% endfor %}
+{% endif %}
+{% if siblings %}
+<h2 class="section">다른 책에 실린 같은 기출</h2>
+<ul class="plain">{% for s in siblings %}<li><a href="/problems/{{ s.id }}">{{ s.instructor }} — {{ s.title }}</a></li>{% endfor %}</ul>
+{% endif %}
+{% endblock %}

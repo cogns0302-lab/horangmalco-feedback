@@ -12,8 +12,11 @@
   <a class="brand" href="/">호랑말코 <span>2차 피드백</span></a>
   {% if user and user.status == 'approved' %}
   <nav>
+    <a href="/examinees">{% if user.role == 'admin' %}수험생{% else %}내 수험생{% endif %}</a>
+    <a href="/problems">문제 은행</a>
     <a href="/jobs">작업 목록</a>
-    {% if user.role == 'admin' %}<a href="/admin/users">회원 승인</a>{% endif %}
+    {% if user.role == 'admin' %}<a href="/admin/import">명단 가져오기</a><a href="/admin/users">크루 관리</a>{% endif %}
+    <span class="who">{{ user.nickname or user.name }}{% if user.level %} · {{ user.level }}{% endif %}</span>
     <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">로그아웃</button></form>
   </nav>
   {% endif %}
@@ -21,6 +24,6 @@
 <main class="{% block main_class %}{% endblock %}">
 {% block body %}{% endblock %}
 </main>
-{% block scripts %}{% endblock %}
+{% block scripts %}<script src="/static/app.js"></script>{% endblock %}
 </body>
 </html>

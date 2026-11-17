@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ job.title }}{% endblock %}
 {% block body %}
-<p><a href="/jobs">← 작업 목록</a></p>
+<p><a href="/jobs">← 작업 목록</a>{% if job.examinee_id %} · <a href="/examinees/{{ job.examinee_id }}">수험생 기록</a>{% endif %}</p>
 <div class="row-head">
   <h1>{{ job.title }}</h1>
   {% if job.status == 'done' %}
@@ -37,6 +37,18 @@
   {% if stats %}· 길이 {{ stats.duration }} · 발화 속도 {{ stats.words_per_min_overall }}어절/분{% endif %}
   {% if job.usage.cost_usd is defined %}· AI 비용(추정) ${{ job.usage.cost_usd }}{% endif %}
 </div>
+{% if job.usage.feedback %}
+<details class="card soft">
+  <summary><b>이 피드백이 참고한 자료</b></summary>
+  <ul class="plain">
+    <li>문제: {% if bank %}<a href="/problems/{{ bank.id }}" target="_blank" rel="noopener">{{ bank.instructor }} {{ bank.title }} ↗</a>{% else %}올린 문제 파일{% endif %}</li>
+    <li>같은 문제의 예시 답안·해설: {% if job.usage.feedback.model_answers %}{{ job.usage.feedback.model_answers | join(' / ') }}{% else %}<span class="muted">없음</span>{% endif %}</li>
+    <li>지난 피드백: {% if job.usage.feedback.examples %}{{ job.usage.feedback.examples | join(' / ') }}{% else %}<span class="muted">없음</span>{% endif %}</li>
+    <li>책에서 찾은 쪽: {% if job.usage.feedback.book_pages %}{{ job.usage.feedback.book_pages | join(', ') }}{% else %}<span class="muted">없음</span>{% endif %}</li>
+  </ul>
+  <p class="muted">자세·시선처리·제스쳐·공간활용·복장과 캡처가 들어가는 칸은 AI가 쓰지 않습니다. 담당 크루가 영상을 보고 채워 주세요.</p>
+</details>
+{% endif %}
 
 {% if fb.review_points %}
 <section class="card review">

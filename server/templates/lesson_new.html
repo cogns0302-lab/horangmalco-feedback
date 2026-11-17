@@ -4,9 +4,9 @@
 {% block body %}
 <p><a href="/">← 처음으로</a></p>
 <h1>수업실연 피드백</h1>
-<p class="muted">영상에서 음성만 추출해 전사한 뒤 1차 피드백을 작성합니다. 동선·표정·제스쳐 등 비언어 항목은 한글 파일에 <b>[2차 영상 검토]</b>로 표시되어 나옵니다.</p>
+<p class="muted">영상에서 음성만 추출해 전사한 뒤, 문제의 조건을 말로 드러냈는지를 중심으로 1차 피드백을 작성합니다. 동선·표정·제스쳐 등 비언어 항목과 캡처 칸은 한글 파일에 <b>[2차 영상 검토]</b>로 비워 둡니다. 명단에 있는 수험생은 <a href="/examinees">수험생 화면</a>에서 시작하세요.</p>
 
-{% if not stt %}<p class="alert">음성 인식(STT) API 키가 아직 설정되지 않았습니다. 관리자가 서버 설정(.env)에 키를 넣어야 처리가 진행됩니다.</p>{% endif %}
+{% if not stt %}<p class="alert">음성 인식(STT) API 키가 아직 설정되지 않았습니다. 관리자가 서버 설정에 키를 넣어야 처리가 진행됩니다.</p>{% endif %}
 
 <form id="lesson-form" method="post" action="/lesson" enctype="multipart/form-data" data-csrf="{{ csrf }}">
   <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -17,8 +17,8 @@
     <div class="grid">
       <label>고객 이름<input name="customer" required maxlength="40" placeholder="예: 홍길동"></label>
       <label>학교급
-        <select name="level" required>
-          {% for lv in levels %}<option value="{{ lv }}" {% if lv == '초특' %}selected{% endif %}>{{ lv }}{% if kb.examples[lv] %} (학습 예시 {{ kb.examples[lv] }}건){% endif %}</option>{% endfor %}
+        <select name="level" id="level" required>
+          {% for lv in levels %}<option value="{{ lv }}" {% if lv == default_level %}selected{% endif %}>{{ lv }}{% if kb.examples[lv] %} (지난 피드백 {{ kb.examples[lv] }}건){% endif %}</option>{% endfor %}
         </select>
       </label>
       <label>응시 지역<input name="region" maxlength="20" placeholder="예: 경기"></label>
@@ -31,31 +31,20 @@
 
   <section class="card">
     <h2>2. 문제</h2>
-    <label>문제 이름<input name="problem_title" required maxlength="80" placeholder="예: 24년 평가원 사회"></label>
-    <label>문제 파일 <small>사진·PDF·한글(hwp/hwpx) — 여러 개 가능</small>
-      <input type="file" name="problem_files" multiple accept=".png,.jpg,.jpeg,.webp,.pdf,.hwp,.hwpx,.txt"></label>
-    <label>또는 문제 붙여넣기 <small>조건·학생 실태까지 전부</small>
-      <textarea name="problem_text" rows="6" maxlength="30000" placeholder="본시 학습 지도 내용, 수험생 유의 사항, 학생 실태를 그대로 붙여넣으세요."></textarea></label>
+    {% set picker_level = default_level %}
+    {% include "_picker.html" %}
   </section>
 
   <section class="card">
     <h2>3. 수업실연 영상</h2>
-    <label class="drop" id="drop">
-      <input type="file" id="video" accept="video/*,audio/*,.mkv,.avi,.wmv,.m4a,.mp3,.wav">
-      <strong id="drop-title">영상 파일을 선택하거나 여기로 끌어다 놓으세요</strong>
-      <span id="drop-sub">mp4, mov 등 · 최대 {{ max_mb }}MB · 음성 파일(m4a, mp3)도 가능</span>
-    </label>
-    <div class="progress" id="up-progress" hidden><div id="up-bar"></div></div>
-    <p class="muted" id="up-text" hidden></p>
-    <label>또는 영상 링크 <small>YouTube는 서버 접속을 막는 경우가 많습니다. 실패하면 파일로 올려 주세요</small>
-      <input name="video_url" id="video_url" maxlength="500" placeholder="https://www.youtube.com/watch?v=..."></label>
+    {% include "_video.html" %}
   </section>
 
   <section class="card soft">
     <b>이번 처리에 쓰이는 것</b>
     <ul class="plain">
       <li>음성 인식: {% if stt %}{% for s in stt %}<span class="tag ok">{{ stt_names[s] }}</span> {% endfor %}{% if stt|length > 1 %}→ 교차 검증해 하나로 병합{% endif %}{% else %}<span class="tag bad">설정 없음</span>{% endif %}</li>
-      <li>학습 자료: 스타일 가이드 {% if kb.style_guide %}<span class="tag ok">있음</span>{% else %}<span class="tag bad">없음</span>{% endif %} · 책 {{ kb.books|length }}권</li>
+      <li>학습 자료: 스타일 가이드 {% if kb.style_guide %}<span class="tag ok">있음</span>{% else %}<span class="tag bad">없음</span>{% endif %} · 책 {{ kb.books|length }}권 · 같은 문제의 예시 답안과 지난 피드백을 함께 참고</li>
     </ul>
   </section>
 
@@ -63,4 +52,3 @@
   <button class="btn primary big" id="start-btn">피드백 시작</button>
 </form>
 {% endblock %}
-{% block scripts %}<script src="/static/app.js"></script>{% endblock %}

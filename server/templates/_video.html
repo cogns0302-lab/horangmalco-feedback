@@ -1,0 +1,9 @@
+<label class="drop" id="drop">
+  <input type="file" id="video" accept="video/*,audio/*,.mkv,.avi,.wmv,.m4a,.mp3,.wav">
+  <strong id="drop-title">영상 파일을 선택하거나 여기로 끌어다 놓으세요</strong>
+  <span id="drop-sub">mp4, mov 등 · 최대 {{ max_mb }}MB · 음성 파일(m4a, mp3)도 가능</span>
+</label>
+<div class="progress" id="up-progress" hidden><div id="up-bar"></div></div>
+<p class="muted" id="up-text" hidden></p>
+<label>또는 영상 링크 <small>YouTube는 서버 접속을 막는 경우가 있습니다. 실패하면 파일로 올려 주세요</small>
+  <input name="video_url" id="video_url" maxlength="500" placeholder="https://www.youtube.com/watch?v=..." value="{{ video_url or '' }}"></label>

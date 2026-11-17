@@ -13,7 +13,7 @@ import traceback
 from pathlib import Path
 
 from . import config, db
-from .pipeline import audio, hwpx, llm, stats, stt
+from .pipeline import audio, hwpx, llm, problembank, stats, stt
 
 _wake = threading.Event()
 PRICES = {  # USD / 1M tokens (입력, 출력) — 대략적인 비용 표시용
@@ -74,9 +74,13 @@ def process(job_id: str) -> None:
 
     # 2) 문제 분석(학생 이름·용어 → STT 힌트, 책 검색어)
     prob_files = sorted((d / "problem").glob("*")) if (d / "problem").exists() else []
-    blocks = llm.problem_blocks(meta.get("problem_text", ""), prob_files)
+    bank = problembank.get(meta.get("problem_id", ""))          # 문제 은행에서 고른 문제(없으면 None)
+    if meta.get("problem_id") and bank is None:
+        raise RuntimeError("고른 문제를 문제 은행에서 찾지 못했습니다. 관리 화면에서 학습 자료(책)를 다시 받은 뒤 "
+                           "'이어서 다시 시도'를 눌러 주세요.")
+    blocks = llm.problem_blocks(meta.get("problem_text", ""), prob_files, bank)
     if not blocks:
-        raise RuntimeError("문제가 입력되지 않았습니다. 문제 텍스트를 붙여넣거나 문제 파일을 올려 주세요.")
+        raise RuntimeError("문제가 입력되지 않았습니다. 문제를 고르거나 문제 파일을 올려 주세요.")
     prob = _read(d / "problem.json")
     if prob is None:
         step("문제 분석", 12)
@@ -120,7 +124,7 @@ def process(job_id: str) -> None:
         _write(d / "stats.json", st)
         fb, usage["feedback"] = llm.write_feedback(
             level=meta.get("level", "초특"), problem=blocks, problem_text=prob["problem_text"],
-            segments=segs, speech_stats=st, meta=meta)
+            segments=segs, speech_stats=st, meta=meta, bank=bank)
         _write(d / "feedback.json", fb)
         db.update_job(job_id, usage=usage)
 

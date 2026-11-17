@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}명단 가져오기{% endblock %}
+{% block main_class %}mid{% endblock %}
+{% block body %}
+<p><a href="/examinees">← 수험생 목록</a></p>
+<h1>명단 가져오기</h1>
+<p class="muted">네이버폼 결과 엑셀이나 피드백 현황 스프레드시트를 올리면, 학교급(유특·초특·중특)별로 나눠 명단에 넣고 담당자가 비어 있는 수험생을 크루 순번대로 한 명씩 배정합니다. 같은 파일을 다시 올려도 이미 있는 사람은 건너뜁니다.</p>
+{% if error %}<p class="alert">{{ error }}</p>{% endif %}
+
+{% if result %}
+<section class="card review">
+  <h2>가져오기 결과 — {{ result.filename }}</h2>
+  <p>
+    <span class="tag ok">새로 추가 {{ result.added }}명</span>
+    <span class="tag">이미 있음 {{ result.skipped }}명</span>
+    {% if result.linked %}<span class="tag">기존 행에 연결 {{ result.linked }}명</span>{% endif %}
+    <span class="tag run">담당 배정 {{ result.assigned }}명</span>
+  </p>
+  <ul class="plain">{% for n in result.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+  {% if not result.rows %}<p class="alert warn">읽어 들인 수험생이 없습니다. 머리글 줄(이름/성함, 학교급)이 있는지 확인해 주세요.</p>{% endif %}
+  <p><a class="btn primary" href="/examinees">수험생 목록 보기</a></p>
+</section>
+{% endif %}
+
+<form class="card" method="post" action="/admin/import" enctype="multipart/form-data">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>파일 <small>엑셀(.xlsx) 또는 CSV</small><input type="file" name="file" required accept=".xlsx,.xlsm,.csv,.tsv"></label>
+  <label>학교급을 알 수 없는 행의 기본 학교급 <small>선택 — 시트 이름이 유특/초특/중특이거나 학교급 열이 있으면 필요 없습니다</small>
+    <select name="level"><option value="">지정 안 함(건너뜀)</option>{% for lv in levels %}<option value="{{ lv }}">{{ lv }}</option>{% endfor %}</select>
+  </label>
+  <button class="btn primary">가져오기</button>
+</form>
+
+<section class="card soft">
+  <b>읽을 수 있는 형식</b>
+  <ul class="plain">
+    <li><b>네이버폼 결과</b> — 설문 결과 화면 ⋮ → 결과 내려받기. 성함/휴대폰, 응시지역과 1차 점수, 학교급, 이메일, 피드백 받고 싶은 부분, 영상을 보내실 날짜 열을 읽습니다.</li>
+    <li><b>피드백 현황 시트</b> — 구글 시트에서 파일 → 다운로드 → Microsoft Excel(.xlsx). 시트 이름(유특·초특·중특)으로 학교급을 정하고 연번, 회수, 이름, 연락처, 지역, 1차 컷플, 영상 업로드 날짜, 이메일, 요구사항, 영상링크, 비고, 담당자, 피드백 완료일자, 개인일정, 정산 열을 읽습니다. 담당자 칸의 이름이 크루 이름·닉네임과 같으면 그 크루에게 연결합니다.</li>
+  </ul>
+  <b>지금 배정 순번</b>
+  <ul class="plain">
+    {% for lv in levels %}<li>{{ lv }}: {% if crew[lv] %}{% for c in crew[lv] %}{{ c.nickname or c.name }}{% if not loop.last %} → {% endif %}{% endfor %}{% else %}<span class="muted">승인된 크루 없음 — 크루를 승인한 뒤 수험생 화면에서 '미배정 순번 배정'을 누르면 배정됩니다</span>{% endif %}</li>{% endfor %}
+  </ul>
+</section>
+{% endblock %}

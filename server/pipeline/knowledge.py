@@ -108,22 +108,38 @@ def search_books(query: str, level: str, kind: str = "lesson", max_chars: int = 
     return [{"book": p["book"], "page": p["page"], "text": p["text"]} for p in picked]
 
 
-def pick_examples(level: str, query: str, n: int = 2, max_chars: int = 13000) -> list[dict]:
-    """같은 학교급의 실제 피드백 중 문제(과목·주제)가 가장 가까운 것을 고른다."""
-    d = config.KNOWLEDGE_DIR / "examples" / level
-    files = sorted(d.glob("*.txt")) if d.exists() else []
-    if not files:                                   # 해당 급 예시가 없으면 다른 급에서라도 가져온다
-        files = sorted((config.KNOWLEDGE_DIR / "examples").glob("*/*.txt"))
+def _title_keys(title: str) -> set[str]:
+    """문제 이름에서 같은 문제를 가리키는 단서(연도 두 자리, 출제 지역, 과목 등)를 뽑는다. '2025학년도 평가원 국어' → {25, 평가원, 국어}"""
+    keys = {y[-2:] for y in re.findall(r"(?:20)?([12]\d)\s*(?:학년도|년)", title)}
+    keys |= {y[-2:] for y in re.findall(r"\b20([12]\d)\b", title)}
+    keys |= {w for w in re.findall(r"[가-힣]{2,}", title) if w not in ("학년도", "실전", "연습문제", "수업실연", "문제", "기출", "예상")}
+    return keys
+
+
+def pick_examples(level: str, query: str, n: int = 2, max_chars: int = 13000, title: str = "",
+                  exclude: str = "") -> list[dict]:
+    """지난해 실제 피드백 중 이번 문제와 가장 가까운 것을 고른다. 같은 문제(파일 이름의 연도·출제 지역·과목이 일치)를
+    가장 먼저, 다음으로 같은 학교급에서 과목·주제가 가까운 문서를 고른다. exclude 는 이번 고객 이름:
+    같은 사람의 지난 피드백은 같은 영상을 다룬 것일 수 있어 참고에서 뺀다."""
+    root = config.KNOWLEDGE_DIR / "examples"
     qtok = Counter(_tokens(query))
+    keys = _title_keys(title)
     scored = []
-    for f in files:
+    for f in sorted(root.glob("*/*.txt")):
+        if exclude and len(exclude) >= 2 and exclude in f.stem:
+            continue
         text = f.read_text(encoding="utf-8", errors="ignore")
         if len(text) < 3000:
             continue
+        same_level = f.parent.name == level
         tf = Counter(_tokens(f.stem + " " + text[:2500]))
         overlap = sum(min(c, tf[t]) for t, c in qtok.items() if t in tf)
         completeness = min(len(text), 12000) / 12000        # 충실히 작성된 문서 선호
-        scored.append((overlap + 3 * completeness, f.name, text))
+        # 파일 이름 예: "황유정 - 경기초특이윤경T - 25년 평가원 국어 피드백"
+        name_hits = sum(1 for k in keys if k in f.stem)
+        same_problem = same_level and name_hits >= 2 and any(k.isdigit() and re.search(rf"(?<!\d){k}\s*년?", f.stem) for k in keys)
+        score = overlap + 3 * completeness + (1000 if same_level else 0) + (5000 if same_problem else 0) + 20 * name_hits
+        scored.append((score, f.name, text))
     scored.sort(reverse=True)
     return [{"name": name, "text": text[:max_chars]} for _, name, text in scored[:n]]
 

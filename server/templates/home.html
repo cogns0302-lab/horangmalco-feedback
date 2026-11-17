@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block body %}
-<h1 class="hello">무엇을 피드백할까요?</h1>
+<h1 class="hello">{{ user.nickname or user.name }}님, 무엇을 할까요?</h1>
 <div class="choices">
+  <a class="choice" href="/examinees">
+    <span class="tag ok">{% if user.role == 'admin' %}전체 {{ mine.c or 0 }}명{% else %}담당 {{ mine.c or 0 }}명{% endif %}</span>
+    <h2>{% if user.role == 'admin' %}수험생 관리{% else %}내 수험생{% endif %}</h2>
+    <p>{% if user.role == 'admin' %}학교급별 명단과 담당 크루를 보고 고칩니다.{% if mine.un %} 담당자가 없는 수험생 {{ mine.un }}명.{% endif %}{% else %}배정된 수험생의 문제를 고르고 피드백을 시작합니다.{% if mine.un %} 진행 중 {{ mine.un }}명.{% endif %}{% endif %}</p>
+    <span class="go">명단 열기 →</span>
+  </a>
   <a class="choice" href="/lesson/new">
-    <span class="tag ok">사용 가능</span>
-    <h2>수업실연</h2>
-    <p>영상을 올리면 음성만 추출해 1차 피드백 초안과 한글 파일을 만듭니다.</p>
+    <span class="tag">명단 없이</span>
+    <h2>수업실연 바로 피드백</h2>
+    <p>명단에 없는 영상을 바로 올려 1차 피드백 초안과 한글 파일을 만듭니다.</p>
     <span class="go">영상 올리기 →</span>
   </a>
   <a class="choice soon" href="/interview/new">

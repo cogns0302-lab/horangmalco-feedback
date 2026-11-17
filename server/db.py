@@ -34,7 +34,41 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS login_attempts (email TEXT, ip TEXT, at REAL);
+CREATE TABLE IF NOT EXISTS examinees (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  level TEXT NOT NULL,                          -- 유특 | 초특 | 중특
+  seq INTEGER NOT NULL DEFAULT 0,               -- 연번
+  round TEXT NOT NULL DEFAULT '',               -- 회수
+  name TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  region TEXT NOT NULL DEFAULT '',
+  score TEXT NOT NULL DEFAULT '',               -- 1차 컷플
+  upload_date TEXT NOT NULL DEFAULT '',         -- 영상 업로드 날짜
+  email TEXT NOT NULL DEFAULT '',
+  request TEXT NOT NULL DEFAULT '',             -- 요구사항
+  video_url TEXT NOT NULL DEFAULT '',           -- 영상링크
+  note TEXT NOT NULL DEFAULT '',                -- 비고
+  crew_id INTEGER,                              -- 담당자(users.id)
+  crew_text TEXT NOT NULL DEFAULT '',           -- 시트에 적혀 있던 담당자 이름(계정과 연결되지 않은 경우)
+  done_date TEXT NOT NULL DEFAULT '',           -- 피드백 완료일자
+  personal TEXT NOT NULL DEFAULT '',            -- 개인일정
+  settle TEXT NOT NULL DEFAULT '',              -- 정산
+  problem_id TEXT NOT NULL DEFAULT '',          -- 문제 은행에서 고른 문제
+  problem_title TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'manual',        -- form | sheet | manual
+  src_key TEXT NOT NULL DEFAULT '',             -- 같은 파일을 다시 올려도 중복으로 들어가지 않게 하는 키
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
+
+# 나중에 추가된 열(이미 만들어진 DB에는 ALTER TABLE 로 붙인다)
+MIGRATIONS = {
+    "users": {"level": "TEXT NOT NULL DEFAULT ''", "nickname": "TEXT NOT NULL DEFAULT ''",
+              "ord": "INTEGER NOT NULL DEFAULT 0"},
+    "jobs": {"examinee_id": "INTEGER"},
+}
 
 
 def conn() -> sqlite3.Connection:
@@ -49,7 +83,23 @@ def conn() -> sqlite3.Connection:
 
 
 def init() -> None:
-    conn().executescript(SCHEMA)
+    c = conn()
+    c.executescript(SCHEMA)
+    for table, cols in MIGRATIONS.items():
+        have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
+        for name, decl in cols.items():
+            if name not in have:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
+def setting(key: str, default: str = "") -> str:
+    r = one("SELECT value FROM settings WHERE key=?", key)
+    return r["value"] if r else default
+
+
+def set_setting(key: str, value: str) -> None:
+    conn().execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                   (key, value))
 
 
 def q(sql: str, *args) -> list[sqlite3.Row]:

@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from server import config  # noqa: E402
-from server.pipeline import hwp_text  # noqa: E402
+from server.pipeline import hwp_text, problembank  # noqa: E402
 
 FEEDBACK_FOLDER = os.environ.get("DRIVE_FEEDBACK_FOLDER", "179KvIWk6C6LFRfZrNfzAi0YKb-BjXSeO")
 BOOKS_FOLDER = os.environ.get("DRIVE_BOOKS_FOLDER", "1b0YvfTHtZs2pdSrB-NFrsbOySfrJZQuS")
@@ -99,17 +99,44 @@ def build(feedback_dir: Path, books_dir: Path) -> None:
     m = 0
     for f in sorted(books_dir.rglob("*.pdf")):
         out = bk_dir / (f.stem + ".txt")
-        if out.exists() and out.stat().st_mtime >= f.stat().st_mtime:
+        if out.exists() and out.stat().st_mtime >= f.stat().st_mtime and not missing_pages(out):
             m += 1
             continue
         doc = pymupdf.open(f)
-        with out.open("w", encoding="utf-8") as o:
-            for i, pg in enumerate(doc):
-                o.write(f"\n\n===== p.{i + 1} =====\n" + pg.get_text())
+        write_book_text(doc, out)
         if out.stat().st_size < len(doc) * 100:
             print(f"주의: '{f.name}' 은 글자 인식(OCR)이 안 된 스캔본 같습니다. 검색 가능한 PDF로 저장해 주세요.")
+        render_pages(doc, out)
         m += 1
     print(f"책 {m}권 정리 →", config.KNOWLEDGE_DIR)
+
+
+def write_book_text(doc, out: Path) -> None:
+    part = out.with_suffix(".part")
+    with part.open("w", encoding="utf-8") as o:
+        for i, pg in enumerate(doc):
+            o.write(f"\n\n===== p.{i + 1} =====\n" + pg.get_text())
+    part.replace(out)
+
+
+def missing_pages(txt: Path) -> list[int]:
+    """문제 은행에 쓸 쪽 가운데 아직 그림으로 만들지 않은 쪽."""
+    return [n for n in problembank.wanted_pages(txt) if not problembank.page_image(txt.stem, n)]
+
+
+def render_pages(doc, txt: Path) -> int:
+    """문제가 실린 쪽을 그림(JPEG)으로 남긴다. 크루가 화면에서 문제를 확인하고, AI도 깨끗한 원문을 읽는다."""
+    import pymupdf
+    todo = missing_pages(txt)
+    d = problembank.page_dir(txt.stem)
+    d.mkdir(parents=True, exist_ok=True)
+    for n in todo:
+        if 1 <= n <= len(doc):
+            pix = doc[n - 1].get_pixmap(dpi=110, colorspace=pymupdf.csRGB)
+            tmp = d / f"{n:04d}.tmp.jpg"
+            pix.save(str(tmp), jpg_quality=62)
+            tmp.replace(d / f"{n:04d}.jpg")
+    return len(todo)
 
 
 def sync_books_from_drive(raw: Path) -> None:
@@ -123,23 +150,24 @@ def sync_books_from_drive(raw: Path) -> None:
         if not f["path"].lower().endswith(".pdf"):
             continue
         out = bk_dir / (Path(f["path"]).stem + ".txt")
-        if out.exists() and out.stat().st_size > 0:
+        have_text = out.exists() and out.stat().st_size > 0
+        if have_text and not missing_pages(out):
             continue
-        print("책 받는 중:", f["path"], flush=True)
+        print("책 받는 중:", f["path"], "" if not have_text else "(문제 쪽 그림 만들기)", flush=True)
         tmp = raw / "book.pdf"
         tmp.unlink(missing_ok=True)
         if not gdown.download(id=f["id"], output=str(tmp), quiet=True):
             print("  받기 실패(공유 권한 또는 다운로드 한도 확인):", f["path"], flush=True)
             continue
         doc = pymupdf.open(tmp)
-        part = out.with_suffix(".part")
-        with part.open("w", encoding="utf-8") as o:
-            for i, pg in enumerate(doc):
-                o.write(f"\n\n===== p.{i + 1} =====\n" + pg.get_text())
-        if part.stat().st_size < len(doc) * 100:
-            print(f"  주의: '{f['path']}' 은 글자 인식(OCR)이 안 된 스캔본 같습니다.", flush=True)
+        if not have_text:
+            write_book_text(doc, out)
+            if out.stat().st_size < len(doc) * 100:
+                print(f"  주의: '{f['path']}' 은 글자 인식(OCR)이 안 된 스캔본 같습니다.", flush=True)
+        n = render_pages(doc, out)
+        if n:
+            print(f"  문제 쪽 그림 {n}장", flush=True)
         doc.close()
-        part.replace(out)
         tmp.unlink(missing_ok=True)
 
 
