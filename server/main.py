@@ -845,7 +845,7 @@ _key_check: dict = {}
 def key_hints() -> dict:
     """API 키 값은 보여 주지 않고, 형식이 맞는지만 알려 준다(잘못 붙여넣은 경우를 찾기 위함)."""
     out = {}
-    for name, prefix in (("ANTHROPIC_API_KEY", "sk-ant-api"), ("GROQ_API_KEY", "gsk_")):
+    for name, prefix in (("ANTHROPIC_API_KEY", "sk-ant-"), ("GROQ_API_KEY", "gsk_")):
         raw = os.environ.get(name, "")
         v = raw.strip().strip('"').strip("'")
         notes = []

@@ -30,11 +30,40 @@ def _usage(msg) -> dict:
             "cache_write": getattr(u, "cache_creation_input_tokens", 0) or 0}
 
 
-def _ask_json(*, model: str, system, content, schema: dict, effort: str, max_tokens: int) -> tuple[dict, dict]:
+def _fit(obj, schema):
+    """모델이 낸 JSON 을 스키마 모양에 맞춘다(빠진 칸은 빈 값, 남는 칸은 버림)."""
+    t = schema.get("type")
+    if t == "object":
+        obj = obj if isinstance(obj, dict) else {}
+        return {k: _fit(obj.get(k), s) for k, s in schema["properties"].items()}
+    if t == "array":
+        return [_fit(x, schema["items"]) for x in obj] if isinstance(obj, list) else []
+    if t == "integer":
+        try:
+            return int(obj)
+        except (TypeError, ValueError):
+            return 0
+    v = "" if obj is None else obj if isinstance(obj, str) else json.dumps(obj, ensure_ascii=False)
+    if "enum" in schema and v not in schema["enum"]:
+        v = {"O": "○", "o": "○", "ㅇ": "○", "X": "×", "x": "×"}.get(v.strip(), v.strip())
+    if "enum" in schema and v not in schema["enum"]:
+        return "-" if "-" in schema["enum"] else schema["enum"][0]
+    return v
+
+
+def _ask_json(*, model: str, system, content, schema: dict, effort: str, max_tokens: int,
+              strict: bool = True) -> tuple[dict, dict]:
+    """strict=False: 구조화 출력 대신 지시문으로 JSON 을 받는다. 스키마가 커서 API 가
+    'compiled grammar is too large' 로 거절하는 피드백 작성에 쓴다."""
+    if not strict:
+        note = ("\n\n## 출력 형식\n아래 JSON 스키마에 맞는 JSON 객체 하나만 출력합니다. 앞뒤에 설명이나 ``` 를 붙이지 않습니다.\n"
+                + json.dumps(schema, ensure_ascii=False))
+        system = (list(system) if isinstance(system, list) else [{"type": "text", "text": system}]) \
+            + [{"type": "text", "text": note}]
     kwargs = dict(
         model=model, max_tokens=max_tokens, system=system,
         messages=[{"role": "user", "content": content}],
-        output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
+        output_config={"effort": effort, **({"format": {"type": "json_schema", "schema": schema}} if strict else {})},
     )
 
     def plain():
@@ -58,8 +87,13 @@ def _ask_json(*, model: str, system, content, schema: dict, effort: str, max_tok
         raise RuntimeError("AI가 요청을 거절했습니다(refusal). 입력 내용을 확인해 주세요.")
     if msg.stop_reason == "max_tokens":
         raise RuntimeError("AI 출력이 길이 제한에 걸려 잘렸습니다. 다시 시도해 주세요.")
-    text = next((b.text for b in msg.content if b.type == "text"), "")
-    return json.loads(text), _usage(msg)
+    text = "".join(b.text for b in msg.content if b.type == "text")
+    if strict:
+        return json.loads(text), _usage(msg)
+    i, j = text.find("{"), text.rfind("}")
+    if i < 0 or j < i:
+        raise RuntimeError("AI 출력에서 JSON 을 찾지 못했습니다. 다시 시도해 주세요.")
+    return _fit(json.loads(text[i:j + 1]), schema), _usage(msg)
 
 
 # ── ① 문제 분석 ─────────────────────────────────────────────────────────────
@@ -333,6 +367,6 @@ def build_feedback_request(*, level: str, problem: list[dict], problem_text: str
 def write_feedback(**kw) -> tuple[dict, dict]:
     system, content, used = build_feedback_request(**kw)
     fb, usage = _ask_json(model=config.FEEDBACK_MODEL, system=system, content=content,
-                          schema=FEEDBACK_SCHEMA, effort=config.FEEDBACK_EFFORT, max_tokens=64000)
+                          schema=FEEDBACK_SCHEMA, effort=config.FEEDBACK_EFFORT, max_tokens=64000, strict=False)
     usage.update(used)
     return fb, usage
