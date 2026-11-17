@@ -13,7 +13,7 @@ if (statusBox) {
       const j = await r.json();
       document.getElementById('step').textContent = j.step || '대기 중';
       document.getElementById('bar').style.width = j.progress + '%';
-      if (j.status === 'done' || j.status === 'error') { location.reload(); return; }
+      if (j.status === 'done' || j.status === 'error' || j.status === 'waiting') { location.reload(); return; }
     } catch (e) { /* 일시적인 네트워크 오류는 다음 주기에 다시 시도 */ }
     setTimeout(tick, 3000);
   };
