@@ -3,33 +3,38 @@
 {% block main_class %}wide{% endblock %}
 {% block body %}
 <h1>크루 관리</h1>
-<p class="muted">크루는 <a href="/signup">크루 가입</a> 화면에서 학교급 · 이름 · 닉네임 · 아이디 · 비밀번호를 정해 가입합니다. 승인해야 로그인할 수 있고, 차단하면 즉시 접속이 끊깁니다. 수험생은 학교급 안에서 순번이 작은 크루부터 한 명씩 돌아가며 배정됩니다.</p>
+<p class="muted">크루는 <a href="/signup">크루 가입</a> 화면에서 학교급 · 이름 · 닉네임 · 아이디 · 비밀번호 · 정산 계좌를 정해 가입합니다. 승인해야 로그인할 수 있고, 차단하면 즉시 접속이 끊깁니다. 수험생은 학교급 안에서 순번이 작은 크루부터 한 명씩 돌아가며 배정됩니다.</p>
 
 {% for lv, users in groups %}
 {% if users or lv in levels %}
 <h2 class="section">{{ lv }} <small class="muted">{{ users|length }}명</small></h2>
 {% if users %}
 <div class="table-wrap">
-<table class="list">
-  <thead><tr><th>순번</th><th>이름</th><th>닉네임</th><th>학교급</th><th>아이디</th><th>정산 계좌 (은행 · 계좌번호 · 예금주)</th><th>상태</th><th>담당 (미완료/전체)</th><th></th></tr></thead>
+<table class="list crew">
+  <colgroup><col class="c-ord"><col class="c-name"><col class="c-nick"><col class="c-lv"><col class="c-id"><col class="c-bank"><col class="c-acct"><col class="c-holder"><col class="c-st"><col class="c-n"><col class="c-act"></colgroup>
+  <thead><tr><th>순번</th><th>이름</th><th>닉네임</th><th>학교급</th><th>아이디</th><th>은행</th><th>계좌번호</th><th>예금주</th><th>상태</th><th title="미완료 / 전체">담당</th><th></th></tr></thead>
   <tbody>
   {% for u in users %}
   <tr>
-    <td><input class="cell num" form="u{{ u.id }}" name="ord" value="{{ u.ord }}" inputmode="numeric" aria-label="순번"></td>
-    <td><input class="cell" form="u{{ u.id }}" name="name" value="{{ u.name }}" maxlength="40" aria-label="이름">{% if u.role == 'admin' %} <span class="tag">관리자</span>{% endif %}</td>
+    <td><input class="cell" form="u{{ u.id }}" name="ord" value="{{ u.ord }}" inputmode="numeric" aria-label="순번"></td>
+    <td><input class="cell" form="u{{ u.id }}" name="name" value="{{ u.name }}" maxlength="40" aria-label="이름">{% if u.role == 'admin' %}<span class="tag">관리자</span>{% endif %}</td>
     <td><input class="cell" form="u{{ u.id }}" name="nickname" value="{{ u.nickname }}" maxlength="40" aria-label="닉네임"></td>
     <td><select class="cell" form="u{{ u.id }}" name="level" aria-label="학교급"><option value="">없음</option>{% for l in levels %}<option value="{{ l }}" {% if l == u.level %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></td>
-    <td>{{ u.email }}</td>
-    <td class="acct"><input class="cell" form="u{{ u.id }}" name="bank" value="{{ u.bank }}" maxlength="30" aria-label="은행"><input class="cell" form="u{{ u.id }}" name="account_no" value="{{ u.account_no }}" maxlength="30" aria-label="계좌번호"><input class="cell" form="u{{ u.id }}" name="account_holder" value="{{ u.account_holder }}" maxlength="40" aria-label="예금주"></td>
-    <td>{% if u.status == 'approved' %}<span class="tag ok">승인</span>{% elif u.status == 'pending' %}<span class="tag run">승인 대기</span>{% else %}<span class="tag bad">차단</span>{% endif %}</td>
-    <td>{{ u.n_todo }} / {{ u.n_all }}</td>
-    <td class="actions">
+    <td class="ellip" title="{{ u.email }}">{{ u.email }}</td>
+    <td><input class="cell" form="u{{ u.id }}" name="bank" value="{{ u.bank }}" maxlength="30" aria-label="은행" placeholder="은행"></td>
+    <td><input class="cell" form="u{{ u.id }}" name="account_no" value="{{ u.account_no }}" maxlength="30" aria-label="계좌번호" placeholder="계좌번호"></td>
+    <td><input class="cell" form="u{{ u.id }}" name="account_holder" value="{{ u.account_holder }}" maxlength="40" aria-label="예금주" placeholder="예금주"></td>
+    <td>{% if u.status == 'approved' %}<span class="tag ok">승인</span>{% elif u.status == 'pending' %}<span class="tag run">대기</span>{% else %}<span class="tag bad">차단</span>{% endif %}</td>
+    <td class="num">{{ u.n_todo }} / {{ u.n_all }}</td>
+    <td>
+      <div class="row-btns">
       <form id="u{{ u.id }}" method="post" action="/admin/users/{{ u.id }}/update"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small">저장</button></form>
       {% if u.id != user.id %}
       {% if u.status != 'approved' %}<form method="post" action="/admin/users/{{ u.id }}/approve"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small primary">승인</button></form>{% endif %}
       {% if u.status != 'blocked' %}<form method="post" action="/admin/users/{{ u.id }}/block"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small">차단</button></form>{% endif %}
       <form method="post" action="/admin/users/{{ u.id }}/delete" data-confirm="이 계정을 삭제할까요? 작업이나 담당 수험생이 있으면 차단만 됩니다."><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small danger">삭제</button></form>
       {% endif %}
+      </div>
     </td>
   </tr>
   {% endfor %}

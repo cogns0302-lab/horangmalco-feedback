@@ -114,3 +114,17 @@ h1 small, h2 small { font-size: .6em; font-weight: 500; }
 fieldset.plain-set { border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px 2px; margin: 14px 0; }
 fieldset.plain-set legend { font-weight: 700; font-size: .92rem; padding: 0 6px; }
 td.acct { white-space: nowrap; } td.acct input.cell { width: 7.5em; margin-right: 4px; }
+
+/* 크루 관리 표 */
+table.crew { table-layout: fixed; min-width: 1180px; }
+table.crew th, table.crew td { padding: 8px 6px; vertical-align: middle; white-space: nowrap; }
+table.crew th { font-size: .8rem; }
+table.crew input.cell, table.crew select.cell { display: block; width: 100%; margin: 0; padding: 6px 8px; font-size: .9rem; }
+table.crew td .tag { margin-top: 4px; }
+table.crew td.ellip { overflow: hidden; text-overflow: ellipsis; font-size: .9rem; }
+table.crew td.num { font-variant-numeric: tabular-nums; }
+table.crew .c-ord { width: 56px; } table.crew .c-name { width: 110px; } table.crew .c-nick { width: 110px; }
+table.crew .c-lv { width: 84px; } table.crew .c-id { width: 120px; } table.crew .c-bank { width: 100px; }
+table.crew .c-acct { width: 150px; } table.crew .c-holder { width: 90px; } table.crew .c-st { width: 64px; }
+table.crew .c-n { width: 64px; } table.crew .c-act { width: 232px; }
+.row-btns { display: flex; gap: 6px; flex-wrap: nowrap; } .row-btns form { margin: 0; }
