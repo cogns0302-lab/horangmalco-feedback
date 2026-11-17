@@ -138,7 +138,9 @@ def pick_examples(level: str, query: str, n: int = 2, max_chars: int = 13000, ti
         # 파일 이름 예: "황유정 - 경기초특이윤경T - 25년 평가원 국어 피드백"
         name_hits = sum(1 for k in keys if k in f.stem)
         same_problem = same_level and name_hits >= 2 and any(k.isdigit() and re.search(rf"(?<!\d){k}\s*년?", f.stem) for k in keys)
-        score = overlap + 3 * completeness + (1000 if same_level else 0) + (5000 if same_problem else 0) + 20 * name_hits
+        near = f.parent.name in LEVELS and level in LEVELS and abs(LEVELS.index(f.parent.name) - LEVELS.index(level)) == 1
+        score = (overlap + 3 * completeness + (1000 if same_level else 300 if near else 0)
+                 + (5000 if same_problem else 0) + 20 * name_hits)
         scored.append((score, f.name, text))
     scored.sort(reverse=True)
     return [{"name": name, "text": text[:max_chars]} for _, name, text in scored[:n]]

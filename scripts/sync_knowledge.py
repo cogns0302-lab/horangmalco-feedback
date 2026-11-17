@@ -49,8 +49,22 @@ def drive_walk(fid: str, path: str = "") -> list[dict]:
     return out
 
 
-def drive_download(folder: str, dst: Path, want) -> None:
+def fetch(file_id: str, target: Path) -> bool:
+    """드라이브 파일 하나를 받는다. 구글이 한동안 내려받기를 막거나(접속 과다) 공유 권한이 없으면 False.
+    한 파일이 실패해도 나머지는 계속 받도록 예외를 삼킨다."""
     import gdown
+    for attempt in range(2):
+        try:
+            if gdown.download(id=file_id, output=str(target), quiet=True) and target.exists() and target.stat().st_size > 0:
+                return True
+        except Exception as e:
+            print("   ", type(e).__name__, str(e).strip().splitlines()[0][:120] if str(e).strip() else "", flush=True)
+        time.sleep(3 * (attempt + 1))
+    target.unlink(missing_ok=True)
+    return False
+
+
+def drive_download(folder: str, dst: Path, want) -> None:
     for f in drive_walk(folder):
         if not want(f["path"]):
             continue
@@ -59,7 +73,8 @@ def drive_download(folder: str, dst: Path, want) -> None:
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         print("받는 중:", f["path"], flush=True)
-        gdown.download(id=f["id"], output=str(target), quiet=True)
+        if not fetch(f["id"], target):
+            print("  받기 실패(건너뜀):", f["path"], flush=True)
 
 
 def level_of(path: str) -> str | None:
@@ -75,7 +90,7 @@ def build(feedback_dir: Path, books_dir: Path) -> None:
     for f in sorted(feedback_dir.rglob("*")):
         if f.suffix.lower() not in (".hwp", ".hwpx"):
             continue
-        rel = "/" + str(f.relative_to(feedback_dir))
+        rel = "/" + f.relative_to(feedback_dir).as_posix()
         if not re.search(r"/2[6-9] 피드백/", rel):            # 현재 틀로 작성된 연도만 예시로 쓴다
             continue
         lv = level_of(rel)
@@ -156,7 +171,7 @@ def sync_books_from_drive(raw: Path) -> None:
         print("책 받는 중:", f["path"], "" if not have_text else "(문제 쪽 그림 만들기)", flush=True)
         tmp = raw / "book.pdf"
         tmp.unlink(missing_ok=True)
-        if not gdown.download(id=f["id"], output=str(tmp), quiet=True):
+        if not fetch(f["id"], tmp):
             print("  받기 실패(공유 권한 또는 다운로드 한도 확인):", f["path"], flush=True)
             continue
         doc = pymupdf.open(tmp)

@@ -53,6 +53,13 @@
     <button class="btn small" {% if sync.running %}disabled{% endif %}>{% if sync.running %}드라이브에서 받는 중…{% else %}드라이브에서 학습 자료 다시 받기{% endif %}</button>
   </form>
   {% if sync.log %}<pre class="log">{{ sync.log }}</pre>{% endif %}
+  {% if uploaded %}<p class="alert okay">학습 자료 묶음에서 파일 {{ uploaded }}개를 넣었습니다.</p>{% endif %}
+  <form class="inline-form" method="post" action="/admin/knowledge/upload" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>학습 자료 묶음 올리기 <small>드라이브 내려받기가 막혔을 때 — examples/·books/·pages/ 가 든 .zip</small>
+      <input type="file" name="file" id="pack-file" required accept=".zip"></label>
+    <button class="btn small">올리기</button>
+  </form>
   {% if kb.books %}<p class="muted">책: {{ kb.books | join(', ') }}</p>{% endif %}
 </div>
 {% endblock %}

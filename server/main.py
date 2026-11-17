@@ -782,6 +782,7 @@ def admin_users(request: Request):
                 kb=knowledge.status(), sync=sync_state(), stt=stt.available(), stt_names=stt_names(),
                 bank=problembank.counts(),
                 page_images=sum(1 for _ in (config.KNOWLEDGE_DIR / "pages").glob("*/*.jpg")),
+                uploaded=request.query_params.get("uploaded"),
                 ai_key=bool(config.env("ANTHROPIC_API_KEY") or config.env("ANTHROPIC_AUTH_TOKEN")))
 
 
@@ -791,6 +792,40 @@ def admin_sync(request: Request, csrf: str = Form("")):
     check_csrf(request, csrf)
     start_sync()
     return RedirectResponse("/admin/users", status_code=303)
+
+
+_PACK_NAME = re.compile(r"examples/(유특|초특|중특)/[^/\\]+\.txt|books/[^/\\]+\.txt|pages/[^/\\]+/\d{4}\.jpg")
+
+
+@app.post("/admin/knowledge/upload")
+async def admin_knowledge_upload(request: Request):
+    """드라이브 내려받기가 막혔을 때 쓰는 길: 다른 곳에서 만든 학습 자료 묶음(.zip)을 올려 data/knowledge 에 푼다.
+    묶음 안의 경로는 examples/<학교급>/*.txt, books/*.txt, pages/<책>/<쪽 4자리>.jpg 만 받는다."""
+    import io
+    import zipfile
+    admin(request)
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    up = form.get("file")
+    if not isinstance(up, UploadFile) or not up.filename:
+        raise HTTPException(400, "파일을 선택해 주세요.")
+    data = await up.read()
+    if len(data) > 100 * 1024 * 1024:
+        raise HTTPException(400, "묶음 파일은 100MB 이하여야 합니다.")
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "zip 파일이 아닙니다.")
+    n = 0
+    for info in zf.infolist():
+        name = info.filename
+        if info.is_dir() or ".." in name or not _PACK_NAME.fullmatch(name) or info.file_size > 30 * 1024 * 1024:
+            continue
+        target = config.KNOWLEDGE_DIR / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(zf.read(info))
+        n += 1
+    return RedirectResponse(f"/admin/users?uploaded={n}", status_code=303)
 
 
 @app.post("/admin/users/{user_id}/update")
