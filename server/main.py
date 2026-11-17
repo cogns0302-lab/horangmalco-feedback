@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.datastructures import UploadFile      # request.form() 이 돌려주는 형(fastapi.UploadFile 은 그 하위 형이라 isinstance 가 거짓)
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import config, db, jobs, roster
+from . import config, db, finals, jobs, roster
 from .pipeline import knowledge, problembank, stt
 from .pipeline.hwpx import REVIEW_MARK
 
@@ -72,6 +72,8 @@ def startup() -> None:
                 db.run("UPDATE users SET pw_hash=?, role='admin', status='approved' WHERE id=?",
                        hash_pw(config.ADMIN_PASSWORD), row["id"])
     jobs.start()
+    finals.DIR.mkdir(parents=True, exist_ok=True)
+    finals.background_retry()
     if config.SYNC_ON_START and knowledge_incomplete():
         start_sync()                                  # 첫 배포 또는 문제 쪽 그림이 아직 없을 때: 드라이브에서 받아 온다
     if config.SYNC_ON_START:
@@ -357,7 +359,9 @@ def job_page(request: Request, job_id: str):
     return page(request, "job.html", job=j, fb=_load(job_id, "feedback.json"),
                 transcript=_load(job_id, "transcript.json"), stats=_load(job_id, "stats.json"),
                 stt_names=stt_names(), review_mark=REVIEW_MARK, bank=problembank.get(j["meta"].get("problem_id")),
-                has_audio=jobs.has_audio(job_id), max_mb=config.MAX_UPLOAD_MB)
+                has_audio=jobs.has_audio(job_id), max_mb=config.MAX_UPLOAD_MB,
+                finals=db.q("SELECT * FROM finals WHERE job_id=? ORDER BY created_at DESC", job_id),
+                final_title=_final_default_title(None, j))
 
 
 @app.get("/api/waiting-count")
@@ -699,6 +703,8 @@ def examinee_page(request: Request, eid: int):
                 files=[{"name": p.name, "ext": p.suffix[1:]} for p in _examinee_files(eid)],
                 bank=problembank.get(e["problem_id"]), saved=bool(request.query_params.get("saved")),
                 skip_fields=("seq", "crew", "request", "note", "video_url"),
+                finals=db.q("SELECT * FROM finals WHERE examinee_id=? ORDER BY created_at DESC", eid),
+                final_title=_final_default_title(e),
                 instructors=problembank.INSTRUCTORS, kinds=problembank.KINDS, stt=stt.available(),
                 stt_names=stt_names(), max_mb=config.MAX_UPLOAD_MB, crew_editable=CREW_EDITABLE)
 
@@ -846,6 +852,8 @@ def admin_users(request: Request):
                 bank=problembank.counts(),
                 page_images=sum(1 for _ in (config.KNOWLEDGE_DIR / "pages").glob("*/*.jpg")),
                 uploaded=request.query_params.get("uploaded"),
+                drive_url=finals.webhook(), drive_check=db.setting("drive_check"),
+                drive_counts={r["drive_status"]: r["c"] for r in db.q("SELECT drive_status, COUNT(*) c FROM finals GROUP BY drive_status")},
                 ai_key=bool(config.env("ANTHROPIC_API_KEY") or config.env("ANTHROPIC_AUTH_TOKEN")),
                 key_check=_key_check, key_hints=key_hints())
 
@@ -975,6 +983,143 @@ def admin_user_action(request: Request, user_id: int, action: str, csrf: str = F
     else:
         raise HTTPException(404)
     return RedirectResponse("/admin/users", status_code=303)
+
+
+# ── 피드백 완성본 ───────────────────────────────────────────────────────────
+@app.get("/finals")
+def finals_page(request: Request, level: str = "", q: str = ""):
+    """크루가 다듬어 보낸 완성본 모음. 모든 크루가 학교급별로 보고 내려받을 수 있다."""
+    u = member(request)
+    level = level if level in LEVELS else ("" if level == "all" else (u["level"] or ""))
+    where, args = ["1=1"], []
+    if level:
+        where.append("f.level=?")
+        args.append(level)
+    if q.strip():
+        where.append("f.title LIKE ?")
+        args.append(f"%{q.strip()[:40]}%")
+    rows = db.q("SELECT f.*, u.name uname, u.nickname unick FROM finals f JOIN users u ON u.id=f.user_id WHERE "
+                + " AND ".join(where) + " ORDER BY f.created_at DESC LIMIT 500", *args)
+    counts = {r["level"]: r["c"] for r in db.q("SELECT level, COUNT(*) c FROM finals GROUP BY level")}
+    return page(request, "finals.html", rows=rows, levels=LEVELS, level=level, q=q, counts=counts,
+                drive_on=bool(finals.webhook()))
+
+
+def _final_default_title(e=None, j=None) -> str:
+    if e:
+        m = j["meta"] if j else {}
+        prob = (m.get("problem_title") if m else "") or e["problem_title"]
+        return f"{e['region']}{e['level']}{e['name']}T - {prob} 피드백".strip()
+    if j:
+        m = j["meta"]
+        return f"{m.get('region', '')}{m.get('level', '')}{m.get('customer', '')}T - {m.get('problem_title', '')} 피드백"
+    return ""
+
+
+@app.post("/finals")
+async def finals_upload(request: Request):
+    u = member(request)
+    form = await request.form()
+    check_csrf(request, form.get("csrf"))
+    up = form.get("file")
+    if not isinstance(up, UploadFile) or not up.filename:
+        raise HTTPException(400, "완성본 파일을 선택해 주세요.")
+    ext = Path(up.filename).suffix.lower()
+    if ext not in finals.EXT:
+        raise HTTPException(400, "한글(hwp/hwpx), PDF, 워드(docx) 파일만 올릴 수 있습니다.")
+    data = await up.read()
+    if len(data) > 40 * 1024 * 1024:
+        raise HTTPException(400, "파일은 40MB 이하여야 합니다.")
+    eid = str(form.get("examinee_id") or "")
+    jid = str(form.get("job_id") or "")
+    e = db.one("SELECT * FROM examinees WHERE id=?", int(eid)) if eid.isdigit() else None
+    if e and u["role"] != "admin" and e["crew_id"] != u["id"]:
+        raise HTTPException(403, "담당 수험생에게만 완성본을 올릴 수 있습니다.")
+    j = None
+    if re.fullmatch(r"[0-9a-f]{32}", jid):
+        j = _job_or_404(jid, u)
+        if not e and j.get("examinee_id"):
+            e = db.one("SELECT * FROM examinees WHERE id=?", j["examinee_id"])
+    level = (e["level"] if e else "") or (j["meta"].get("level") if j else "") or str(form.get("level") or "")
+    if level not in LEVELS:
+        raise HTTPException(400, "학교급을 선택해 주세요.")
+    title = str(form.get("title") or "").strip()[:120] or _final_default_title(e, j) or Path(up.filename).stem
+    fid = db.run("INSERT INTO finals(level,title,ext,size,examinee_id,job_id,user_id,drive_status,created_at) "
+                 "VALUES(?,?,?,?,?,?,?,?,?)", level, title, ext, len(data), e["id"] if e else None,
+                 j["id"] if j else "", u["id"], "pending" if finals.webhook() else "off", time.time())
+    row = db.one("SELECT * FROM finals WHERE id=?", fid)
+    finals.path(row).write_bytes(data)
+    if e and not e["done_date"]:                       # 완성본을 올리면 피드백 완료일자를 오늘로
+        db.run("UPDATE examinees SET done_date=?, updated_at=? WHERE id=?",
+               time.strftime("%m.%d", time.localtime()), time.time(), e["id"])
+    finals.add_to_knowledge(row)
+    if finals.webhook():
+        finals.upload_later(fid)
+    back = str(form.get("back") or "")
+    return RedirectResponse(back if back.startswith("/") and not back.startswith("//") else "/finals", status_code=303)
+
+
+def _final_or_404(fid: int):
+    row = db.one("SELECT * FROM finals WHERE id=?", fid)
+    if not row or not finals.path(row).exists():
+        raise HTTPException(404, "파일을 찾을 수 없습니다.")
+    return row
+
+
+@app.get("/finals/{fid}/file")
+def finals_file(request: Request, fid: int):
+    member(request)
+    row = _final_or_404(fid)
+    name = finals.safe_name(row["title"]) + row["ext"]
+    return FileResponse(finals.path(row), media_type=finals.MIME.get(row["ext"], "application/octet-stream"),
+                        headers={"Content-Disposition": f"attachment; filename=\"final{row['ext']}\"; filename*=UTF-8''{quote(name)}"})
+
+
+@app.post("/finals/{fid}/delete")
+def finals_delete(request: Request, fid: int, csrf: str = Form("")):
+    u = member(request)
+    check_csrf(request, csrf)
+    row = _final_or_404(fid)
+    if u["role"] != "admin" and row["user_id"] != u["id"]:
+        raise HTTPException(403, "본인이 올린 완성본만 지울 수 있습니다.")
+    finals.path(row).unlink(missing_ok=True)
+    for f in (config.KNOWLEDGE_DIR / "examples" / row["level"]).glob(f"완성본 {row['id']:04d} - *.txt"):
+        f.unlink(missing_ok=True)
+    db.run("DELETE FROM finals WHERE id=?", fid)
+    return RedirectResponse("/finals", status_code=303)
+
+
+@app.post("/finals/{fid}/drive")
+def finals_drive_retry(request: Request, fid: int, csrf: str = Form("")):
+    member(request)
+    check_csrf(request, csrf)
+    _final_or_404(fid)
+    finals.upload_to_drive(fid)
+    return RedirectResponse("/finals", status_code=303)
+
+
+@app.post("/admin/drive")
+def admin_drive(request: Request, url: str = Form(""), csrf: str = Form("")):
+    """Apps Script 웹 앱 주소 저장 → 바로 연결 확인 → 못 올린 완성본 다시 올리기."""
+    import requests
+    admin(request)
+    check_csrf(request, csrf)
+    url = url.strip()
+    if url and not re.fullmatch(r"https://script\.google\.com/macros/s/[A-Za-z0-9_-]+/exec", url):
+        raise HTTPException(400, "Apps Script 웹 앱 주소(https://script.google.com/macros/s/…/exec)를 넣어 주세요.")
+    db.set_setting("drive_webhook", url)
+    msg = "연결 주소를 지웠습니다."
+    if url:
+        try:
+            r = requests.get(url, timeout=30)
+            ok = r.status_code == 200 and "horangmalco-drive-upload" in r.text
+            msg = "연결 확인 완료" if ok else f"연결 확인 실패: HTTP {r.status_code} (배포의 액세스 권한이 '모든 사용자'인지 확인)"
+        except Exception as ex:
+            msg = f"연결 확인 실패: {type(ex).__name__}"
+        if msg == "연결 확인 완료":
+            threading.Thread(target=finals.retry_pending, daemon=True).start()
+    db.set_setting("drive_check", msg)
+    return RedirectResponse("/admin/users#drive", status_code=303)
 
 
 # Jinja 필터

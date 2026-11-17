@@ -45,6 +45,19 @@
 {% endif %}
 {% endfor %}
 
+<h2 class="section" id="drive">구글 드라이브 연결 (피드백 완성본)</h2>
+<div class="card soft">
+  <p>완성본은 드라이브 <b>27 피드백</b> 폴더의 유특·초특·중특 폴더에 저장됩니다. 관리자 구글 계정으로 배포한 Apps Script 웹 앱 주소를 넣어 주세요.
+    {% if drive_url %}<span class="tag ok">연결됨</span>{% else %}<span class="tag bad">연결 전</span>{% endif %}
+    {% if drive_check %} · {{ drive_check }}{% endif %}</p>
+  <p class="muted">완성본: 저장됨 {{ drive_counts.get('done', 0) }} · 대기 {{ drive_counts.get('pending', 0) + drive_counts.get('off', 0) }} · 실패 {{ drive_counts.get('error', 0) }}</p>
+  <form class="inline-form" method="post" action="/admin/drive">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="grow">웹 앱 주소 <small>https://script.google.com/macros/s/…/exec</small><input name="url" id="drive-url" value="{{ drive_url }}" autocomplete="off"></label>
+    <button class="btn small">저장하고 연결 확인</button>
+  </form>
+</div>
+
 <h2 class="section" id="keys">서버 설정 상태</h2>
 <div class="card soft">
   <p><b>API 키 형식</b> (값은 보여 주지 않습니다)</p>

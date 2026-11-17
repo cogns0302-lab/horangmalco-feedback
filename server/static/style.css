@@ -128,3 +128,7 @@ table.crew .c-lv { width: 84px; } table.crew .c-id { width: 120px; } table.crew 
 table.crew .c-acct { width: 150px; } table.crew .c-holder { width: 90px; } table.crew .c-st { width: 64px; }
 table.crew .c-n { width: 64px; } table.crew .c-act { width: 232px; }
 .row-btns { display: flex; gap: 6px; flex-wrap: nowrap; } .row-btns form { margin: 0; }
+
+.final-up label.narrow { flex: 0 0 110px; } .final-up label.grow { flex: 1 1 240px; }
+form.search { margin: 6px 0; } form.search input { margin: 0; width: 220px; padding: 7px 12px; }
+table.finals td { vertical-align: middle; } table.finals td small { margin-left: 4px; }

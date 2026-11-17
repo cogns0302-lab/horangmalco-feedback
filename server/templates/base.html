@@ -14,6 +14,7 @@
   <nav>
     <a href="/examinees">{% if user.role == 'admin' %}수험생{% else %}내 수험생{% endif %}</a>
     <a href="/problems">문제 은행</a>
+    <a href="/finals">피드백 완성본</a>
     <a href="/jobs">작업 목록</a>
     {% if user.role == 'admin' %}<a href="/admin/import">명단 가져오기</a><a href="/admin/users">크루 관리</a>{% endif %}
     <span class="who">{{ user.nickname or user.name }}{% if user.level %} · {{ user.level }}{% endif %}</span>

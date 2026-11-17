@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}피드백 완성본{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block body %}
+<div class="row-head">
+  <h1>피드백 완성본 <small class="muted">{{ rows|length }}건</small></h1>
+</div>
+<p class="muted">크루가 다듬어 고객에게 보낸 최종 피드백입니다. 모든 크루가 보고 내려받을 수 있습니다.
+  {% if drive_on %}올린 파일은 구글 드라이브 <b>27 피드백</b> 폴더의 학교급 폴더에도 자동으로 저장됩니다.{% else %}<span class="tag bad">드라이브 연결 전</span> 관리자가 드라이브를 연결하면 그때 한꺼번에 올라갑니다.{% endif %}
+  한글 파일 완성본은 다음 AI 피드백의 참고 자료로도 쓰입니다.</p>
+
+<div class="filters">
+  <div class="seg">
+    <a class="seg-btn {% if not level %}on{% endif %}" href="/finals?level=all">전체</a>
+    {% for lv in levels %}<a class="seg-btn {% if lv == level %}on{% endif %}" href="/finals?level={{ lv }}">{{ lv }} <small>{{ counts.get(lv, 0) }}</small></a>{% endfor %}
+  </div>
+  <form class="search" method="get" action="/finals">
+    <input type="hidden" name="level" value="{{ level or 'all' }}">
+    <input name="q" value="{{ q }}" placeholder="이름·문제로 찾기" aria-label="검색">
+  </form>
+</div>
+
+{% if rows %}
+<div class="table-wrap">
+<table class="list finals">
+  <thead><tr><th>학교급</th><th>제목</th><th>올린 크루</th><th>올린 날</th><th>드라이브</th><th></th></tr></thead>
+  <tbody>
+  {% for f in rows %}
+  <tr>
+    <td><span class="tag">{{ f.level }}</span></td>
+    <td><a href="/finals/{{ f.id }}/file">{{ f.title }}<small class="muted">{{ f.ext }}</small></a>
+      {% if f.examinee_id and (user.role == 'admin') %} <a class="muted" href="/examinees/{{ f.examinee_id }}">수험생 기록</a>{% endif %}</td>
+    <td>{{ f.unick or f.uname }}</td>
+    <td class="muted">{{ f.created_at | dt }}</td>
+    <td>{% if f.drive_status == 'done' %}<a href="{{ f.drive_url }}" target="_blank" rel="noopener noreferrer"><span class="tag ok">저장됨 ↗</span></a>
+        {% elif f.drive_status == 'pending' %}<span class="tag run">올리는 중</span>
+        {% elif f.drive_status == 'off' %}<span class="tag">연결 전</span>
+        {% else %}<span class="tag bad" title="{{ f.drive_error }}">실패</span>{% endif %}</td>
+    <td class="row-btns">
+      <a class="btn small" href="/finals/{{ f.id }}/file">받기</a>
+      {% if f.drive_status in ('error', 'off') and drive_on %}<form method="post" action="/finals/{{ f.id }}/drive"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small">다시 올리기</button></form>{% endif %}
+      {% if user.role == 'admin' or f.user_id == user.id %}<form method="post" action="/finals/{{ f.id }}/delete" data-confirm="이 완성본을 웹앱에서 지울까요? 드라이브에 올라간 파일은 그대로 남습니다."><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small danger">삭제</button></form>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<p class="card soft">아직 올라온 완성본이 없습니다. 수험생 화면이나 피드백 작업 화면의 <b>완성본 올리기</b>에서 올리면 여기에 모입니다.</p>
+{% endif %}
+
+<h2 class="section">완성본 직접 올리기</h2>
+{% set final_title = '' %}{% set final_level = level %}
+{% include "_final_upload.html" %}
+{% endblock %}

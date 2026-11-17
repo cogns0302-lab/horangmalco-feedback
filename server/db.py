@@ -61,6 +61,20 @@ CREATE TABLE IF NOT EXISTS examinees (
   updated_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS finals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  level TEXT NOT NULL,
+  title TEXT NOT NULL,
+  ext TEXT NOT NULL,
+  size INTEGER NOT NULL DEFAULT 0,
+  examinee_id INTEGER,
+  job_id TEXT NOT NULL DEFAULT '',
+  user_id INTEGER NOT NULL,
+  drive_status TEXT NOT NULL DEFAULT 'pending',   -- pending | done | error | off
+  drive_url TEXT NOT NULL DEFAULT '',
+  drive_error TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL
+);
 """
 
 # 나중에 추가된 열(이미 만들어진 DB에는 ALTER TABLE 로 붙인다)
