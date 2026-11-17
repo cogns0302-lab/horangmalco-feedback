@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}{{ job.title }}{% endblock %}
+{% block body %}
+<p><a href="/jobs">← 작업 목록</a></p>
+<div class="row-head">
+  <h1>{{ job.title }}</h1>
+  {% if job.status == 'done' %}
+  <div class="actions">
+    <a class="btn primary" href="/jobs/{{ job.id }}/download/hwpx">한글 파일 받기 (.hwpx)</a>
+    <a class="btn" href="/jobs/{{ job.id }}/download/transcript">전사문 받기</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if job.status in ('queued', 'running') %}
+<div class="card" id="status" data-job="{{ job.id }}">
+  <h2 id="step">{{ job.step or '대기 중' }}</h2>
+  <div class="progress"><div id="bar" data-progress="{{ job.progress }}"></div></div>
+  <p class="muted">음성 추출 → 문제 분석 → 음성 인식 → 전사문 교차 검증 → 피드백 작성 → 한글 파일 생성 순서로 진행됩니다. 15분 영상 기준 보통 5~10분 걸립니다. 이 창을 닫아도 계속 진행됩니다.</p>
+</div>
+{% elif job.status == 'error' %}
+<div class="card">
+  <p class="alert"><b>처리 중 오류가 발생했습니다.</b><br>{{ job.error }}</p>
+  <form method="post" action="/jobs/{{ job.id }}/regenerate"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="feedback"><button class="btn primary">이어서 다시 시도</button></form>
+</div>
+{% endif %}
+
+{% if job.meta.stt_errors %}
+<p class="alert warn">일부 음성 인식기가 실패해 나머지 결과로 진행했습니다:
+{% for k, v in job.meta.stt_errors.items() %}<br><b>{{ stt_names.get(k, k) }}</b> — {{ v }}{% endfor %}</p>
+{% endif %}
+{% if job.meta.timestamps_approx %}<p class="alert warn">타임스탬프를 주는 음성 인식기가 없어 시각을 어림했습니다. 피드백의 시간은 실제와 수십 초 차이 날 수 있습니다.</p>{% endif %}
+
+{% if fb %}
+<div class="meta-line">
+  {% if job.meta.stt_ok %}음성 인식: {% for s in job.meta.stt_ok %}<span class="tag ok">{{ stt_names.get(s, s) }}</span> {% endfor %}{% endif %}
+  {% if stats %}· 길이 {{ stats.duration }} · 발화 속도 {{ stats.words_per_min_overall }}어절/분{% endif %}
+  {% if job.usage.cost_usd is defined %}· AI 비용(추정) ${{ job.usage.cost_usd }}{% endif %}
+</div>
+
+{% if fb.review_points %}
+<section class="card review">
+  <h2>2차(영상) 검토 포인트</h2>
+  <p class="muted">AI는 음성만 들었습니다. 아래 시각은 영상을 직접 확인해 주세요. 한글 파일의 자세·시선처리·제스쳐·공간활용·복장 칸은 <b>{{ review_mark }}</b>로 비어 있습니다.</p>
+  <ul class="timeline">{% for r in fb.review_points %}<li><time>{{ r.time }}</time><span>{{ r.what }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>&lt;1. 조건&gt;</h2>
+  <div class="table-wrap"><table class="fb">
+    <thead><tr><th>유의 사항</th><th class="c">수행</th><th class="c">시간</th></tr></thead>
+    <tbody>{% for c in fb.conditions %}<tr><td>{{ c.text }}{% if c.note %}<div class="note">→ {{ c.note }}</div>{% endif %}</td><td class="c mark">{{ c.result }}</td><td class="c">{{ c.times | join(', ') }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="table-wrap"><table class="fb">
+    <thead><tr><th>이름</th><th>특성, 수행 수준</th><th class="c">수행</th><th class="c">시간</th></tr></thead>
+    <tbody>{% for s in fb.students %}{% for t in s.traits %}<tr>{% if loop.first %}<th rowspan="{{ s.traits|length }}">{{ s.name }}{% if s.group and s.group not in s.name %}<br><small>{{ s.group }}</small>{% endif %}</th>{% endif %}<td>{{ t.text }}{% if t.note %}<div class="note">→ {{ t.note }}</div>{% endif %}</td><td class="c mark">{{ t.result }}</td><td class="c">{{ t.times | join(', ') }}</td></tr>{% endfor %}{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="card">
+  <h2>&lt;2. 수업&gt;</h2>
+  {% for st in fb.lesson %}
+  <h3>{{ st.stage }}</h3>
+  <ul class="timeline">
+    {% if not st["items"] %}<li><time>—</time><span class="muted">해당 단계의 코멘트가 없습니다.</span></li>{% endif %}
+    {% for it in st["items"] %}<li><time>{{ it.time }}</time><span><span class="pre">{{ it.comment | comment }}</span>{% if it.example %}<span class="pre ex">ex. {{ it.example }}</span>{% endif %}</span></li>{% endfor %}
+  </ul>
+  {% endfor %}
+  <h3>기타 — 목표 재언급 / 왜 배우나</h3><p class="pre">{{ fb.lesson_etc }}</p>
+</section>
+
+<section class="card">
+  <h2>&lt;3. 학생 참여&gt;</h2>
+  <p>{% for c in fb.participation.counts %}<span class="tag">{{ c.name }}{% if c.group %}({{ c.group }}){% endif %} {{ c.count }}회</span> {% endfor %}</p>
+  <dl class="kv">
+    <dt>종합의견</dt><dd class="pre">{{ fb.participation.summary }}</dd>
+    <dt>학생 수준 구분</dt><dd class="pre">{{ fb.participation.level_distinction }}</dd>
+    <dt>학생 간 상호작용</dt><dd class="pre">{{ fb.participation.peer_interaction }}</dd>
+    <dt>확산적 발문 및 대답유도</dt><dd class="pre">{{ fb.participation.divergent_questions }}</dd>
+    <dt>흥미/동기유발</dt><dd class="pre">{{ fb.participation.motivation }}</dd>
+    <dt>또래교수</dt><dd class="pre">{{ fb.participation.peer_tutoring }}</dd>
+    <dt>자기평가·동료평가</dt><dd class="pre">{{ fb.participation.assessment }}</dd>
+  </dl>
+</section>
+
+<section class="card">
+  <h2>&lt;4. 태도&gt;</h2>
+  <dl class="kv">
+    <dt>자신감 및 수업 분위기</dt><dd class="pre">{{ fb.attitude.confidence }}</dd>
+    <dt>목소리·발음·억양·속도</dt><dd class="pre">{{ fb.attitude.voice }}</dd>
+    <dt>수업속도</dt><dd class="pre">{{ fb.attitude.pace }}</dd>
+    <dt>간투사</dt><dd class="pre">{{ fb.attitude.fillers }}</dd>
+    <dt>경어</dt><dd class="pre">{{ fb.attitude.honorifics }}</dd>
+    <dt>돌발상황 대처</dt><dd class="pre">{{ fb.attitude.contingency }}</dd>
+    {% for label, key in [('자세','posture'),('시선처리','gaze'),('제스쳐','gesture'),('공간활용','space'),('복장 및 단정함','attire')] %}
+    <dt>{{ label }}</dt><dd class="pre human">{{ review_mark }}{% if fb.attitude[key] %} {{ fb.attitude[key] }}{% endif %}</dd>
+    {% endfor %}
+  </dl>
+</section>
+
+<section class="card">
+  <h2>&lt;5. 총평&gt;</h2>
+  <dl class="kv">
+    <dt>태도</dt><dd class="pre">{{ fb.overall.attitude }}</dd>
+    <dt>수업</dt><dd class="pre">{{ fb.overall.lesson }}</dd>
+    <dt>상호작용</dt><dd class="pre">{{ fb.overall.interaction }}</dd>
+    <dt>개선사항</dt><dd><ol>{% for i in fb.overall.improvements %}<li>{{ i }}</li>{% endfor %}</ol></dd>
+    <dt>최종의견</dt><dd class="pre">{{ fb.overall.final }}</dd>
+    <dt>합격생 팁</dt><dd><ol>{% for i in fb.overall.tips %}<li>{{ i }}</li>{% endfor %}</ol></dd>
+  </dl>
+</section>
+{% endif %}
+
+{% if transcript %}
+<details class="card">
+  <summary><b>전사문 보기</b> <span class="muted">({{ transcript.segments|length }}개 구간)</span></summary>
+  <ul class="timeline small">{% for s in transcript.segments %}<li><time>{{ '%d:%02d' % ((s.start // 60), (s.start % 60)) }}</time><span>{{ s.text }}</span></li>{% endfor %}</ul>
+</details>
+{% endif %}
+
+{% if job.status in ('done', 'error') %}
+<section class="card soft">
+  <b>다시 만들기</b>
+  <div class="actions">
+    {% if transcript %}<form method="post" action="/jobs/{{ job.id }}/regenerate" data-confirm="피드백을 다시 작성할까요? (전사문은 그대로 사용)"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="feedback"><button class="btn small">피드백만 다시 작성</button></form>{% endif %}
+    <form method="post" action="/jobs/{{ job.id }}/regenerate" data-confirm="음성 인식부터 다시 할까요? STT 비용이 다시 듭니다."><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="what" value="all"><button class="btn small">음성 인식부터 다시</button></form>
+    <form method="post" action="/jobs/{{ job.id }}/delete" data-confirm="이 작업과 파일을 모두 삭제할까요?"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small danger">삭제</button></form>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="/static/app.js"></script>{% endblock %}

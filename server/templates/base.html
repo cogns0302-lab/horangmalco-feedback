@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>{% block title %}2차 피드백{% endblock %} · 호랑말코</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">호랑말코 <span>2차 피드백</span></a>
+  {% if user and user.status == 'approved' %}
+  <nav>
+    <a href="/jobs">작업 목록</a>
+    {% if user.role == 'admin' %}<a href="/admin/users">회원 승인</a>{% endif %}
+    <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">로그아웃</button></form>
+  </nav>
+  {% endif %}
+</header>
+<main class="{% block main_class %}{% endblock %}">
+{% block body %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

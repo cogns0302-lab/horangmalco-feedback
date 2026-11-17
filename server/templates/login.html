@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}로그인{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block body %}
+<div class="card auth">
+  <h1>로그인</h1>
+  <p class="muted">승인된 팀원만 사용할 수 있는 비공개 도구입니다.</p>
+  {% if error %}<p class="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/login">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>이메일<input type="email" name="email" required autocomplete="username" autofocus></label>
+    <label>비밀번호<input type="password" name="password" required autocomplete="current-password"></label>
+    <button class="btn primary wide">로그인</button>
+  </form>
+  <p class="muted center">처음이신가요? <a href="/signup">사용 신청</a></p>
+</div>
+{% endblock %}

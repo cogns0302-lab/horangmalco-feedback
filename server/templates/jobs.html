@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}작업 목록{% endblock %}
+{% block body %}
+<div class="row-head"><h1>작업 목록</h1><a class="btn primary" href="/lesson/new">새 수업실연 피드백</a></div>
+{% if jobs %}{% include "_job_rows.html" %}{% else %}<p class="muted">아직 작업이 없습니다.</p>{% endif %}
+{% endblock %}

@@ -1,0 +1,19 @@
+<div class="table-wrap">
+<table class="list">
+  <thead><tr><th>제목</th><th>올린 사람</th><th>상태</th><th>일시</th></tr></thead>
+  <tbody>
+  {% for j in (jobs if jobs is defined else recent) %}
+  <tr>
+    <td><a href="/jobs/{{ j.id }}">{{ j.title }}</a></td>
+    <td>{{ j.uname }}</td>
+    <td>
+      {% if j.status == 'done' %}<span class="tag ok">완료</span>
+      {% elif j.status == 'error' %}<span class="tag bad">오류</span>
+      {% else %}<span class="tag run">{{ j.step or '대기 중' }} {{ j.progress }}%</span>{% endif %}
+    </td>
+    <td class="muted">{{ j.created_at | dt }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

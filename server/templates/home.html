@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block body %}
+<h1 class="hello">무엇을 피드백할까요?</h1>
+<div class="choices">
+  <a class="choice" href="/lesson/new">
+    <span class="tag ok">사용 가능</span>
+    <h2>수업실연</h2>
+    <p>영상을 올리면 음성만 추출해 1차 피드백 초안과 한글 파일을 만듭니다.</p>
+    <span class="go">영상 올리기 →</span>
+  </a>
+  <a class="choice soon" href="/interview/new">
+    <span class="tag">준비 중</span>
+    <h2>면접</h2>
+    <p>피드백 틀을 구상 중입니다. 틀이 확정되면 같은 방식으로 열립니다.</p>
+    <span class="go">미리 보기 →</span>
+  </a>
+</div>
+{% if recent %}
+<section class="recent">
+  <div class="row-head"><h3>최근 작업</h3><a href="/jobs">전체 보기</a></div>
+  {% include "_job_rows.html" %}
+</section>
+{% endif %}
+{% endblock %}
