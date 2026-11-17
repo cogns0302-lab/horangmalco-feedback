@@ -44,7 +44,7 @@
     <td>{% if e.crew_id %}{{ e.crew_nick or e.crew_name }}{% elif e.crew_text %}{{ e.crew_text }} <span class="tag">계정 없음</span>{% else %}<span class="tag bad">미배정</span>{% endif %}</td>
     <td>{% if e.problem_title %}{{ e.problem_title }}{% else %}<span class="muted">—</span>{% endif %}</td>
     <td>{% if e.video_url %}<a href="{{ e.video_url }}" target="_blank" rel="noopener noreferrer">링크 ↗</a>{% else %}<span class="muted">—</span>{% endif %}</td>
-    <td>{% if e.job_id %}<a href="/jobs/{{ e.job_id }}">{% if e.job_status == 'done' %}<span class="tag ok">완료</span>{% elif e.job_status == 'error' %}<span class="tag bad">오류</span>{% else %}<span class="tag run">처리 중</span>{% endif %}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td>{% if e.job_id %}<a href="/jobs/{{ e.job_id }}">{% if e.job_status == 'done' %}<span class="tag ok">완료</span>{% elif e.job_status == 'error' %}<span class="tag bad">오류</span>{% elif e.job_status == 'waiting' %}<span class="tag bad">영상 파일 필요</span>{% else %}<span class="tag run">처리 중</span>{% endif %}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
     <td>{% if e.done_date %}<span class="tag ok">{{ e.done_date }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
   </tr>
   {% endfor %}

@@ -165,6 +165,16 @@ if (form) {
     if (form.dataset.ready) return;
     e.preventDefault();
     errBox.hidden = true;
+    if (form.dataset.attach) {                    // 대기 중인 작업에 파일만 붙이기
+      if (!file) return showError('영상 또는 음성 파일을 선택해 주세요.');
+      submit.disabled = true; submit.textContent = '올리는 중…';
+      try {
+        document.getElementById('upload_id').value = await upload();
+        form.dataset.ready = '1';
+        HTMLFormElement.prototype.submit.call(form);
+      } catch (err) { showError(err.message); }
+      return;
+    }
     const url = document.getElementById('video_url').value.trim();
     if (!problemReady()) return showError('문제를 골라 주세요. 강사(박해인·서진)를 누른 뒤 기출·예상 문제를 고르거나, 문제 업로드로 파일을 올리면 됩니다.');
     if (!file && !url) return showError('영상 파일을 선택하거나 영상 링크를 입력해 주세요.');

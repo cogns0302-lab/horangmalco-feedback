@@ -18,6 +18,24 @@
   <div class="progress"><div id="bar" data-progress="{{ job.progress }}"></div></div>
   <p class="muted">음성 추출 → 문제 분석 → 음성 인식 → 전사문 교차 검증 → 피드백 작성 → 한글 파일 생성 순서로 진행됩니다. 15분 영상 기준 보통 5~10분 걸립니다. 이 창을 닫아도 계속 진행됩니다.</p>
 </div>
+{% elif job.status in ('waiting', 'error') and not has_audio %}
+<form class="card review" id="lesson-form" method="post" action="/jobs/{{ job.id }}/attach" data-csrf="{{ csrf }}" data-attach="1">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="upload_id" id="upload_id">
+  <h2>영상 파일이 필요합니다</h2>
+  <p class="muted">서버에서 영상 링크를 받지 못했습니다(YouTube가 서버 접속을 막는 경우가 많습니다). 영상이나 음성 파일을 올리면 이어서 처리합니다. 관리자 PC의 도우미가 켜져 있으면 자동으로 받아 올립니다.</p>
+  {% if job.meta.video_url %}<p>링크: <a href="{{ job.meta.video_url }}" target="_blank" rel="noopener noreferrer">{{ job.meta.video_url }} ↗</a></p>{% endif %}
+  {% set video_url = '' %}
+  <label class="drop" id="drop">
+    <input type="file" id="video" accept="video/*,audio/*,.mkv,.avi,.wmv,.m4a,.mp3,.wav">
+    <strong id="drop-title">영상 파일을 선택하거나 여기로 끌어다 놓으세요</strong>
+    <span id="drop-sub">mp4, mov, m4a, mp3 등 · 최대 {{ max_mb }}MB</span>
+  </label>
+  <div class="progress" id="up-progress" hidden><div id="up-bar"></div></div>
+  <p class="muted" id="up-text" hidden></p>
+  <p id="form-error" class="alert" hidden></p>
+  <button class="btn primary" id="start-btn">파일 올리고 이어서 처리</button>
+</form>
 {% elif job.status == 'error' %}
 <div class="card">
   <p class="alert"><b>처리 중 오류가 발생했습니다.</b><br>{{ job.error }}</p>

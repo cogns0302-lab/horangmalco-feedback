@@ -22,6 +22,23 @@ PRICES = {  # USD / 1M tokens (입력, 출력) — 대략적인 비용 표시용
 }
 
 
+class NeedsMedia(Exception):
+    """영상 링크에서 음성을 받지 못했거나 파일이 없다 → 사람이(또는 도우미가) 파일을 붙여 줄 때까지 기다린다."""
+
+
+def has_audio(job_id: str) -> bool:
+    return (config.JOB_DIR / job_id / "audio.mp3").exists()
+
+
+def attach_media(job_id: str, src: Path, ext: str) -> None:
+    """대기 중인 작업에 영상·음성 파일을 붙이고 다시 줄에 세운다."""
+    d = job_dir(job_id)
+    for old in d.glob("source.*"):
+        old.unlink(missing_ok=True)
+    src.replace(d / ("source" + ext))
+    enqueue(job_id)
+
+
 def job_dir(job_id: str) -> Path:
     d = config.JOB_DIR / job_id
     d.mkdir(parents=True, exist_ok=True)
@@ -63,9 +80,14 @@ def process(job_id: str) -> None:
         step("음성 추출", 5)
         src = next(iter(sorted(d.glob("source.*"))), None)
         if src is None and meta.get("video_url"):
-            src = audio.download_audio(meta["video_url"], d)
+            try:
+                src = audio.download_audio(meta["video_url"], d)
+            except RuntimeError as e:
+                # 서버에서는 YouTube 가 접속을 막는 일이 잦다. 오류로 끝내지 않고 '영상 파일 대기'로 두어,
+                # 작업 화면에서 파일을 붙이거나 관리자 PC의 도우미가 받아 올리면 이어서 처리한다.
+                raise NeedsMedia(str(e)) from e
         if src is None:
-            raise RuntimeError("영상(또는 음성) 파일이 없습니다.")
+            raise NeedsMedia("영상(또는 음성) 파일이 없습니다.")
         meta["duration"] = audio.extract_audio(src, audio_path)
         if not config.KEEP_VIDEO:
             src.unlink(missing_ok=True)                 # 원본 영상은 지워 저장 공간을 아낀다
@@ -147,6 +169,8 @@ def _loop() -> None:
         db.update_job(jid, status="running", error="")
         try:
             process(jid)
+        except NeedsMedia as e:
+            db.update_job(jid, status="waiting", step="영상 파일 대기", progress=0, error=f"{e}"[:2000])
         except Exception as e:
             traceback.print_exc()
             db.update_job(jid, status="error", error=f"{e}"[:2000])

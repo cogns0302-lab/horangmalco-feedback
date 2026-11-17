@@ -39,8 +39,18 @@
 {% endif %}
 {% endfor %}
 
-<h2 class="section">서버 설정 상태</h2>
+<h2 class="section" id="keys">서버 설정 상태</h2>
 <div class="card soft">
+  <p><b>API 키 형식</b> (값은 보여 주지 않습니다)</p>
+  <ul class="plain">{% for k, v in key_hints.items() %}<li><code>{{ k }}</code>: {{ v }}</li>{% endfor %}</ul>
+  {% if key_check %}
+  <ul class="plain">
+    <li>Claude 키 확인: {% if key_check.claude[0] %}<span class="tag ok">정상</span>{% else %}<span class="tag bad">실패</span> {{ key_check.claude[1] }}{% endif %}</li>
+    <li>Groq 키 확인: {% if key_check.groq[0] %}<span class="tag ok">정상</span>{% else %}<span class="tag bad">실패</span> {{ key_check.groq[1] }}{% endif %}</li>
+  </ul>
+  {% endif %}
+  <form method="post" action="/admin/check-keys"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small">API 키가 통하는지 확인</button></form>
+  <hr>
   <ul class="plain">
     <li>Claude API 키: {% if ai_key %}<span class="tag ok">설정됨</span>{% else %}<span class="tag bad">없음 (ANTHROPIC_API_KEY)</span>{% endif %}</li>
     <li>음성 인식: {% if stt %}{% for s in stt %}<span class="tag ok">{{ stt_names[s] }}</span> {% endfor %}{% else %}<span class="tag bad">설정된 키 없음</span>{% endif %}</li>

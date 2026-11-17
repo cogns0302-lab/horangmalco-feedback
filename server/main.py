@@ -4,11 +4,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
 import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -72,6 +74,19 @@ def startup() -> None:
     jobs.start()
     if config.SYNC_ON_START and knowledge_incomplete():
         start_sync()                                  # 첫 배포 또는 문제 쪽 그림이 아직 없을 때: 드라이브에서 받아 온다
+    if config.SYNC_ON_START:
+        threading.Thread(target=_sync_later, daemon=True, name="knowledge-sync").start()
+
+
+def _sync_later() -> None:
+    """구글 드라이브가 서버의 내려받기를 한동안 막는 일이 있어, 12시간마다 빠진 자료만 다시 받아 본다.
+    (이미 받은 파일은 건너뛴다. 드라이브에 새 책·피드백을 넣으면 이때 함께 들어온다.)"""
+    while True:
+        time.sleep(12 * 3600)
+        try:
+            start_sync()
+        except Exception:
+            pass
 
 
 def knowledge_incomplete() -> bool:
@@ -330,7 +345,44 @@ def job_page(request: Request, job_id: str):
     j = _job_or_404(job_id, u)
     return page(request, "job.html", job=j, fb=_load(job_id, "feedback.json"),
                 transcript=_load(job_id, "transcript.json"), stats=_load(job_id, "stats.json"),
-                stt_names=stt_names(), review_mark=REVIEW_MARK, bank=problembank.get(j["meta"].get("problem_id")))
+                stt_names=stt_names(), review_mark=REVIEW_MARK, bank=problembank.get(j["meta"].get("problem_id")),
+                has_audio=jobs.has_audio(job_id), max_mb=config.MAX_UPLOAD_MB)
+
+
+@app.get("/api/waiting-count")
+def waiting_count():
+    """영상 파일을 기다리는 작업 수(숫자만, 로그인 없이). 관리자 PC의 도우미가 할 일이 있는지 먼저 확인하는 데 쓴다."""
+    return {"count": db.one("SELECT COUNT(*) c FROM jobs WHERE status='waiting'")["c"]}
+
+
+@app.get("/api/jobs/waiting")
+def waiting_jobs(request: Request):
+    """영상 링크를 서버에서 받지 못해 파일을 기다리는 작업 목록(본인이 볼 수 있는 범위)."""
+    u = member(request)
+    where, args = _job_scope(u)
+    rows = db.q(f"SELECT j.id, j.title, j.meta FROM jobs j WHERE j.status='waiting' AND {where} ORDER BY created_at", *args)
+    return [{"id": r["id"], "title": r["title"], "video_url": json.loads(r["meta"] or "{}").get("video_url", "")}
+            for r in rows]
+
+
+@app.post("/jobs/{job_id}/attach")
+def job_attach(request: Request, job_id: str, upload_id: str = Form(""), csrf: str = Form("")):
+    """영상 파일 대기 중인 작업에 영상·음성 파일을 붙여 이어서 처리한다."""
+    u = member(request)
+    check_csrf(request, csrf)
+    j = _job_or_404(job_id, u)
+    if j["status"] not in ("waiting", "error") or jobs.has_audio(job_id):
+        raise HTTPException(409, "이 작업은 이미 음성이 있거나 처리 중입니다.")
+    if not re.fullmatch(r"[0-9a-f]{32}", upload_id):
+        raise HTTPException(400, "영상 또는 음성 파일을 올려 주세요.")
+    up = config.UPLOAD_DIR / upload_id
+    info = json.loads((up / "info.json").read_text()) if (up / "info.json").exists() else None
+    if not info or info["received"] != info["size"]:
+        raise HTTPException(400, "파일 업로드가 끝나지 않았습니다.")
+    jobs.attach_media(job_id, up / ("source" + info["ext"]), info["ext"])
+    (up / "info.json").unlink()
+    up.rmdir()
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
 
 @app.get("/api/jobs/{job_id}")
@@ -783,7 +835,58 @@ def admin_users(request: Request):
                 bank=problembank.counts(),
                 page_images=sum(1 for _ in (config.KNOWLEDGE_DIR / "pages").glob("*/*.jpg")),
                 uploaded=request.query_params.get("uploaded"),
-                ai_key=bool(config.env("ANTHROPIC_API_KEY") or config.env("ANTHROPIC_AUTH_TOKEN")))
+                ai_key=bool(config.env("ANTHROPIC_API_KEY") or config.env("ANTHROPIC_AUTH_TOKEN")),
+                key_check=_key_check, key_hints=key_hints())
+
+
+_key_check: dict = {}
+
+
+def key_hints() -> dict:
+    """API 키 값은 보여 주지 않고, 형식이 맞는지만 알려 준다(잘못 붙여넣은 경우를 찾기 위함)."""
+    out = {}
+    for name, prefix in (("ANTHROPIC_API_KEY", "sk-ant-api"), ("GROQ_API_KEY", "gsk_")):
+        raw = os.environ.get(name, "")
+        v = raw.strip().strip('"').strip("'")
+        notes = []
+        if not raw:
+            notes.append("값이 없음")
+        else:
+            notes.append(f"{len(v)}자")
+            notes.append(f"'{prefix}…' 로 시작함" if v.startswith(prefix) else f"'{prefix}…' 로 시작하지 않음 — 다른 값이 들어간 것 같습니다")
+            if raw != raw.strip() or re.search(r"\s", v):
+                notes.append("공백·줄바꿈이 섞여 있음")
+            if raw.strip()[:1] in "\"'":
+                notes.append("따옴표가 함께 들어감")
+        out[name] = " · ".join(notes)
+    return out
+
+
+@app.post("/admin/check-keys")
+def admin_check_keys(request: Request, csrf: str = Form("")):
+    """Claude · Groq 키가 실제로 통하는지 비용이 들지 않는 호출(모델 목록)로 확인한다."""
+    import requests
+    admin(request)
+    check_csrf(request, csrf)
+    res = {"at": time.time()}
+    try:
+        import anthropic
+        anthropic.Anthropic().models.list(limit=1)
+        res["claude"] = (True, "정상")
+    except Exception as e:
+        res["claude"] = (False, f"{type(e).__name__}: {e}"[:300])
+    if config.GROQ_API_KEY:
+        try:
+            r = requests.get("https://api.groq.com/openai/v1/models",
+                             headers={"Authorization": "Bearer " + config.GROQ_API_KEY}, timeout=30)
+            res["groq"] = (r.status_code == 200, "정상" if r.status_code == 200 else f"HTTP {r.status_code}: {r.text[:200]}")
+        except Exception as e:
+            res["groq"] = (False, f"{type(e).__name__}: {e}"[:300])
+    else:
+        res["groq"] = (False, "GROQ_API_KEY 값이 없음")
+    _key_check.clear()
+    _key_check.update(res)
+    return RedirectResponse("/admin/users#keys", status_code=303)
 
 
 @app.post("/admin/knowledge/sync")

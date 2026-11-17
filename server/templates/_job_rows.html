@@ -9,6 +9,7 @@
     <td>
       {% if j.status == 'done' %}<span class="tag ok">완료</span>
       {% elif j.status == 'error' %}<span class="tag bad">오류</span>
+      {% elif j.status == 'waiting' %}<span class="tag bad">영상 파일 필요</span>
       {% else %}<span class="tag run">{{ j.step or '대기 중' }} {{ j.progress }}%</span>{% endif %}
     </td>
     <td class="muted">{{ j.created_at | dt }}</td>
