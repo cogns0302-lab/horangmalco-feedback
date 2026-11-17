@@ -236,8 +236,9 @@ ROLE = """당신은 특수교사 임용 2차 시험 수업실연 컨설팅 팀�
 아래는 팀의 실제 피드백 67건을 분석해 정리한 스타일 가이드입니다. 판정 기준, 코멘트 문법, 자주 짚는 지점, 말투를 이 가이드에 맞춥니다."""
 
 
-def write_feedback(*, level: str, problem: list[dict], problem_text: str, segments: list[dict],
-                   speech_stats: dict, meta: dict) -> tuple[dict, dict]:
+def build_feedback_request(*, level: str, problem: list[dict], problem_text: str, segments: list[dict],
+                           speech_stats: dict, meta: dict) -> tuple[list[dict], list[dict], dict]:
+    """피드백 작성 요청의 system / user content 와 참고 자료 목록을 만든다."""
     guide = config.STYLE_GUIDE.read_text(encoding="utf-8") if config.STYLE_GUIDE.exists() else ""
     examples = knowledge.pick_examples(level, problem_text, n=2)
     pages = knowledge.search_books(problem_text, level, "lesson")
@@ -266,8 +267,14 @@ def write_feedback(*, level: str, problem: list[dict], problem_text: str, segmen
         "<전사문>\n" + stats.transcript_text(segments) + "\n</전사문>\n\n"
         "위 문제와 전사문으로 1차 피드백을 작성해 주세요. 고객 요구사항이 있으면 총평에서 그 질문에 직접 답해 주세요.")})
 
+    used = {"examples": [e["name"] for e in examples],
+            "book_pages": [f"{p['book']} p.{p['page']}" for p in pages]}
+    return system, content, used
+
+
+def write_feedback(**kw) -> tuple[dict, dict]:
+    system, content, used = build_feedback_request(**kw)
     fb, usage = _ask_json(model=config.FEEDBACK_MODEL, system=system, content=content,
                           schema=FEEDBACK_SCHEMA, effort=config.FEEDBACK_EFFORT, max_tokens=64000)
-    usage["examples"] = [e["name"] for e in examples]
-    usage["book_pages"] = [f"{p['book']} p.{p['page']}" for p in pages]
+    usage.update(used)
     return fb, usage
