@@ -233,11 +233,15 @@ def signup_form(request: Request):
 
 @app.post("/signup")
 def signup(request: Request, name: str = Form(""), nickname: str = Form(""), level: str = Form(""),
-           email: str = Form(""), password: str = Form(""), csrf: str = Form("")):
-    """크루 가입: 학교급 · 이름 · 닉네임 · 아이디 · 비밀번호. 관리자가 승인해야 로그인된다."""
+           email: str = Form(""), password: str = Form(""), bank: str = Form(""), account_no: str = Form(""),
+           account_holder: str = Form(""), csrf: str = Form("")):
+    """크루 가입: 학교급 · 이름 · 닉네임 · 아이디 · 비밀번호 · 정산 계좌. 관리자가 승인해야 로그인된다."""
     check_csrf(request, csrf)
     name, nickname, email = name.strip()[:40], nickname.strip()[:40], email.strip().lower()[:60]
-    form = {"name": name, "nickname": nickname, "level": level, "email": email}
+    bank, account_holder = bank.strip()[:30], account_holder.strip()[:40]
+    account_no = re.sub(r"[^0-9-]", "", account_no)[:30]
+    form = {"name": name, "nickname": nickname, "level": level, "email": email,
+            "bank": bank, "account_no": account_no, "account_holder": account_holder}
 
     def fail(msg: str):
         return page(request, "signup.html", levels=LEVELS, form=form, error=msg)
@@ -252,13 +256,20 @@ def signup(request: Request, name: str = Form(""), nickname: str = Form(""), lev
         return fail("아이디는 영문 소문자·숫자로 3자 이상 입력해 주세요(. _ - @ 사용 가능).")
     if len(password) < 8:
         return fail("비밀번호는 8자 이상이어야 합니다.")
+    if not bank:
+        return fail("은행을 입력해 주세요.")
+    if len(re.sub(r"\D", "", account_no)) < 8:
+        return fail("계좌번호를 숫자로 정확히 입력해 주세요.")
+    if not account_holder:
+        return fail("예금주를 입력해 주세요.")
     if db.one("SELECT 1 FROM users WHERE email=?", email):
         return fail("이미 사용 중인 아이디입니다. 다른 아이디를 입력해 주세요.")
     is_admin = bool(config.ADMIN_EMAIL) and email == config.ADMIN_EMAIL and not config.ADMIN_PASSWORD
     ord_ = db.one("SELECT COALESCE(MAX(ord),0) m FROM users WHERE level=?", level)["m"] + 1
-    db.run("INSERT INTO users(email,name,nickname,level,ord,pw_hash,role,status,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-           email, name, nickname, level, ord_, hash_pw(password), "admin" if is_admin else "member",
-           "approved" if is_admin else "pending", time.time())
+    db.run("INSERT INTO users(email,name,nickname,level,ord,bank,account_no,account_holder,pw_hash,role,status,created_at) "
+           "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+           email, name, nickname, level, ord_, bank, account_no, account_holder, hash_pw(password),
+           "admin" if is_admin else "member", "approved" if is_admin else "pending", time.time())
     return page(request, "pending.html", just_signed_up=True)
 
 
@@ -933,14 +944,16 @@ async def admin_knowledge_upload(request: Request):
 
 @app.post("/admin/users/{user_id}/update")
 def admin_user_update(request: Request, user_id: int, name: str = Form(""), nickname: str = Form(""),
-                      level: str = Form(""), ord: str = Form(""), csrf: str = Form("")):
+                      level: str = Form(""), ord: str = Form(""), bank: str = Form(""), account_no: str = Form(""),
+                      account_holder: str = Form(""), csrf: str = Form("")):
     admin(request)
     check_csrf(request, csrf)
     if not db.one("SELECT 1 FROM users WHERE id=?", user_id):
         raise HTTPException(404)
-    db.run("UPDATE users SET name=?, nickname=?, level=?, ord=? WHERE id=?",
+    db.run("UPDATE users SET name=?, nickname=?, level=?, ord=?, bank=?, account_no=?, account_holder=? WHERE id=?",
            name.strip()[:40] or "이름 없음", nickname.strip()[:40], level if level in LEVELS else "",
-           int(ord) if ord.strip().isdigit() else 0, user_id)
+           int(ord) if ord.strip().isdigit() else 0, bank.strip()[:30], re.sub(r"[^0-9-]", "", account_no)[:30],
+           account_holder.strip()[:40], user_id)
     return RedirectResponse("/admin/users", status_code=303)
 
 

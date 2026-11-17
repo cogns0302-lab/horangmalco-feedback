@@ -111,3 +111,6 @@ img.page { display: block; width: 100%; height: auto; border: 1px solid var(--li
 ul.files li { display: flex; gap: 14px; align-items: center; } ul.files form { margin: 0; }
 button.link.danger { color: var(--bad); }
 h1 small, h2 small { font-size: .6em; font-weight: 500; }
+fieldset.plain-set { border: 1px solid var(--line); border-radius: 10px; padding: 4px 14px 2px; margin: 14px 0; }
+fieldset.plain-set legend { font-weight: 700; font-size: .92rem; padding: 0 6px; }
+td.acct { white-space: nowrap; } td.acct input.cell { width: 7.5em; margin-right: 4px; }

@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 # 나중에 추가된 열(이미 만들어진 DB에는 ALTER TABLE 로 붙인다)
 MIGRATIONS = {
-    "users": {"level": "TEXT NOT NULL DEFAULT ''", "nickname": "TEXT NOT NULL DEFAULT ''",
+    "users": {"bank": "TEXT NOT NULL DEFAULT ''", "account_no": "TEXT NOT NULL DEFAULT ''", "account_holder": "TEXT NOT NULL DEFAULT ''",
+              "level": "TEXT NOT NULL DEFAULT ''", "nickname": "TEXT NOT NULL DEFAULT ''",
               "ord": "INTEGER NOT NULL DEFAULT 0"},
     "jobs": {"examinee_id": "INTEGER"},
 }

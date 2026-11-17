@@ -18,6 +18,12 @@
     <label>닉네임 <small>화면과 담당자 칸에 표시됩니다</small><input name="nickname" required maxlength="40" value="{{ form.nickname or '' }}"></label>
     <label>아이디 <small>영문 소문자·숫자 3자 이상</small><input name="email" required minlength="3" maxlength="60" autocomplete="username" autocapitalize="none" value="{{ form.email or '' }}"></label>
     <label>비밀번호 <small>8자 이상</small><input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+    <fieldset class="plain-set">
+      <legend>정산 계좌 <small>관리자만 볼 수 있습니다</small></legend>
+      <label>은행<input name="bank" required maxlength="30" placeholder="예: 국민은행" value="{{ form.bank or '' }}"></label>
+      <label>계좌번호 <small>숫자와 - 만</small><input name="account_no" required maxlength="30" inputmode="numeric" autocomplete="off" value="{{ form.account_no or '' }}"></label>
+      <label>예금주<input name="account_holder" required maxlength="40" value="{{ form.account_holder or '' }}"></label>
+    </fieldset>
     <button class="btn primary wide">가입 신청</button>
   </form>
   <p class="muted center"><a href="/login">로그인으로 돌아가기</a></p>

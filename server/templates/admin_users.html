@@ -11,7 +11,7 @@
 {% if users %}
 <div class="table-wrap">
 <table class="list">
-  <thead><tr><th>순번</th><th>이름</th><th>닉네임</th><th>학교급</th><th>아이디</th><th>상태</th><th>담당 (미완료/전체)</th><th></th></tr></thead>
+  <thead><tr><th>순번</th><th>이름</th><th>닉네임</th><th>학교급</th><th>아이디</th><th>정산 계좌 (은행 · 계좌번호 · 예금주)</th><th>상태</th><th>담당 (미완료/전체)</th><th></th></tr></thead>
   <tbody>
   {% for u in users %}
   <tr>
@@ -20,6 +20,7 @@
     <td><input class="cell" form="u{{ u.id }}" name="nickname" value="{{ u.nickname }}" maxlength="40" aria-label="닉네임"></td>
     <td><select class="cell" form="u{{ u.id }}" name="level" aria-label="학교급"><option value="">없음</option>{% for l in levels %}<option value="{{ l }}" {% if l == u.level %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></td>
     <td>{{ u.email }}</td>
+    <td class="acct"><input class="cell" form="u{{ u.id }}" name="bank" value="{{ u.bank }}" maxlength="30" aria-label="은행"><input class="cell" form="u{{ u.id }}" name="account_no" value="{{ u.account_no }}" maxlength="30" aria-label="계좌번호"><input class="cell" form="u{{ u.id }}" name="account_holder" value="{{ u.account_holder }}" maxlength="40" aria-label="예금주"></td>
     <td>{% if u.status == 'approved' %}<span class="tag ok">승인</span>{% elif u.status == 'pending' %}<span class="tag run">승인 대기</span>{% else %}<span class="tag bad">차단</span>{% endif %}</td>
     <td>{{ u.n_todo }} / {{ u.n_all }}</td>
     <td class="actions">
