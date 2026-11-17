@@ -59,6 +59,11 @@ def startup() -> None:
         if not row:                                   # 최초 실행 시 관리자 계정 생성
             db.run("INSERT INTO users(email,name,pw_hash,role,status,created_at) VALUES(?,?,?,?,?,?)",
                    config.ADMIN_EMAIL, "관리자", hash_pw(config.ADMIN_PASSWORD), "admin", "approved", time.time())
+        else:                                         # 환경변수 ADMIN_PASSWORD 가 바뀌면 관리자 비밀번호를 맞춘다
+            cur = db.one("SELECT pw_hash FROM users WHERE id=?", row["id"])
+            if not check_pw(config.ADMIN_PASSWORD, cur["pw_hash"]):
+                db.run("UPDATE users SET pw_hash=?, role='admin', status='approved' WHERE id=?",
+                       hash_pw(config.ADMIN_PASSWORD), row["id"])
     jobs.start()
     st = knowledge.status()
     if config.SYNC_ON_START and not any(st["examples"].values()) and not st["books"]:
