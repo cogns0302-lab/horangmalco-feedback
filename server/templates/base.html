@@ -17,7 +17,7 @@
     <a href="/finals">피드백 완성본</a>
     <a href="/jobs">작업 목록</a>
     {% if user.role == 'admin' %}<a href="/admin/import">명단 가져오기</a><a href="/admin/users">크루 관리</a>{% endif %}
-    <span class="who">{{ user.nickname or user.name }}{% if user.level %} · {{ user.level }}{% endif %}</span>
+    <a class="who" href="/me" title="마이페이지">{{ user.nickname or user.name }}{% if user.level %} · {{ user.level }}{% endif %} · 마이페이지</a>
     <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="link">로그아웃</button></form>
   </nav>
   {% endif %}

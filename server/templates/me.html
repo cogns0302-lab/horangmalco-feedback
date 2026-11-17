@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}마이페이지{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block body %}
+<h1>마이페이지</h1>
+{% if msg %}<p class="alert okay">{{ msg }}</p>{% endif %}
+{% if err %}<p class="alert">{{ err }}</p>{% endif %}
+{% if me.status == 'pending' %}<p class="alert warn">아직 승인 대기 중입니다. 정보를 고쳐 두면 승인 뒤에도 그대로 쓰입니다.</p>{% endif %}
+
+<form class="card" method="post" action="/me">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <h2>내 정보</h2>
+  <dl class="kv small-kv">
+    <dt>아이디</dt><dd>{{ me.email }}</dd>
+    <dt>학교급</dt><dd>{{ me.level or '없음' }} <small class="muted">바꾸려면 관리자에게 요청하세요(수험생 배정에 쓰입니다)</small></dd>
+  </dl>
+  <label>이름<input name="name" required maxlength="40" value="{{ me.name }}"></label>
+  <label>닉네임 <small>화면과 담당자 칸에 표시됩니다</small><input name="nickname" required maxlength="40" value="{{ me.nickname }}"></label>
+  <fieldset class="plain-set">
+    <legend>정산 계좌 <small>관리자만 볼 수 있습니다</small></legend>
+    <label>은행<input name="bank" maxlength="30" placeholder="예: 국민은행" value="{{ me.bank }}" {% if me.role != 'admin' %}required{% endif %}></label>
+    <label>계좌번호 <small>숫자와 - 만</small><input name="account_no" maxlength="30" inputmode="numeric" autocomplete="off" value="{{ me.account_no }}" {% if me.role != 'admin' %}required{% endif %}></label>
+    <label>예금주<input name="account_holder" maxlength="40" value="{{ me.account_holder }}" {% if me.role != 'admin' %}required{% endif %}></label>
+  </fieldset>
+  <button class="btn primary wide">저장</button>
+</form>
+
+<form class="card" method="post" action="/me/password">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <h2>비밀번호 바꾸기</h2>
+  <input type="text" name="username" value="{{ me.email }}" autocomplete="username" hidden>
+  <label>현재 비밀번호<input type="password" name="current" required autocomplete="current-password"></label>
+  <label>새 비밀번호 <small>8자 이상</small><input type="password" name="new" required minlength="8" autocomplete="new-password"></label>
+  <label>새 비밀번호 확인<input type="password" name="new2" required minlength="8" autocomplete="new-password"></label>
+  <button class="btn wide">비밀번호 바꾸기</button>
+</form>
+{% endblock %}

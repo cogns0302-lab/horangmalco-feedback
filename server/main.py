@@ -985,6 +985,59 @@ def admin_user_action(request: Request, user_id: int, action: str, csrf: str = F
     return RedirectResponse("/admin/users", status_code=303)
 
 
+# ── 마이페이지 ──────────────────────────────────────────────────────────────
+def _self(request: Request):
+    """승인 대기 중인 크루도 자기 정보는 고칠 수 있다(차단된 계정은 불가)."""
+    u = current_user(request)
+    if not u:
+        raise Redirect("/login")
+    if u["status"] == "blocked":
+        raise Redirect("/pending")
+    return u
+
+
+@app.get("/me")
+def me_page(request: Request):
+    u = _self(request)
+    return page(request, "me.html", me=u, msg=request.query_params.get("msg", ""),
+                err=request.query_params.get("err", ""))
+
+
+@app.post("/me")
+def me_save(request: Request, name: str = Form(""), nickname: str = Form(""), bank: str = Form(""),
+            account_no: str = Form(""), account_holder: str = Form(""), csrf: str = Form("")):
+    """이름 · 닉네임 · 정산 계좌. 학교급과 아이디는 배정에 쓰이므로 관리자만 바꾼다."""
+    u = _self(request)
+    check_csrf(request, csrf)
+    name, nickname = name.strip()[:40], nickname.strip()[:40]
+    bank, account_holder = bank.strip()[:30], account_holder.strip()[:40]
+    account_no = re.sub(r"[^0-9-]", "", account_no)[:30]
+    if not name or not nickname:
+        return RedirectResponse("/me?err=" + quote("이름과 닉네임을 입력해 주세요."), status_code=303)
+    if u["role"] != "admin" and (not bank or len(re.sub(r"\D", "", account_no)) < 8 or not account_holder):
+        return RedirectResponse("/me?err=" + quote("은행 · 계좌번호 · 예금주를 정확히 입력해 주세요."), status_code=303)
+    db.run("UPDATE users SET name=?, nickname=?, bank=?, account_no=?, account_holder=? WHERE id=?",
+           name, nickname, bank, account_no, account_holder, u["id"])
+    return RedirectResponse("/me?msg=" + quote("저장했습니다."), status_code=303)
+
+
+@app.post("/me/password")
+def me_password(request: Request, current: str = Form(""), new: str = Form(""), new2: str = Form(""),
+                csrf: str = Form("")):
+    u = _self(request)
+    check_csrf(request, csrf)
+    if not check_pw(current, u["pw_hash"]):
+        return RedirectResponse("/me?err=" + quote("현재 비밀번호가 맞지 않습니다."), status_code=303)
+    if len(new) < 8:
+        return RedirectResponse("/me?err=" + quote("새 비밀번호는 8자 이상이어야 합니다."), status_code=303)
+    if new != new2:
+        return RedirectResponse("/me?err=" + quote("새 비밀번호 두 칸이 서로 다릅니다."), status_code=303)
+    if u["role"] == "admin" and config.ADMIN_PASSWORD and u["email"] == config.ADMIN_EMAIL:
+        return RedirectResponse("/me?err=" + quote("관리자 비밀번호는 Railway 의 ADMIN_PASSWORD 로 바꿉니다."), status_code=303)
+    db.run("UPDATE users SET pw_hash=? WHERE id=?", hash_pw(new), u["id"])
+    return RedirectResponse("/me?msg=" + quote("비밀번호를 바꿨습니다."), status_code=303)
+
+
 # ── 피드백 완성본 ───────────────────────────────────────────────────────────
 @app.get("/finals")
 def finals_page(request: Request, level: str = "", q: str = ""):

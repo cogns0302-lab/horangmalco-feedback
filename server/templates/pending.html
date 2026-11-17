@@ -11,6 +11,6 @@
   {% else %}
   <p>아직 승인되지 않았습니다. 관리자 승인 후 이용할 수 있습니다.</p>
   {% endif %}
-  <p><a class="btn" href="/login">로그인 화면으로</a></p>
+  <p><a class="btn" href="/login">로그인 화면으로</a>{% if user and user.status == 'pending' %} <a class="btn" href="/me">내 정보 고치기</a>{% endif %}</p>
 </div>
 {% endblock %}
