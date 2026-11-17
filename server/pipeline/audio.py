@@ -28,10 +28,16 @@ def extract_audio(src: Path, dst: Path) -> float:
 def download_audio(url: str, dst_dir: Path) -> Path:
     """YouTube 등 링크에서 음성만 내려받는다(yt-dlp). 일부공개 링크는 가능, 비공개는 불가."""
     out = dst_dir / "source.%(ext)s"
-    r = subprocess.run(
-        ["yt-dlp", "--no-playlist", "-f", "bestaudio/best", "-o", str(out), url],
-        capture_output=True, text=True, timeout=1800)
-    files = sorted(dst_dir.glob("source.*"))
-    if r.returncode != 0 or not files:
-        raise RuntimeError("영상 링크에서 음성을 받지 못했습니다(yt-dlp): " + r.stderr[-400:])
-    return files[0]
+    err = ""
+    # YouTube 는 일반(https) 음성 형식을 403 으로 막는 경우가 있어, 실패하면 HLS(m3u8) 음성으로 다시 받는다.
+    for fmt in ("bestaudio/best", "233/234/bestaudio[protocol*=m3u8]/best[protocol*=m3u8]/worst"):
+        for f in dst_dir.glob("source.*"):
+            f.unlink(missing_ok=True)
+        r = subprocess.run(
+            ["yt-dlp", "--no-playlist", "-f", fmt, "-o", str(out), url],
+            capture_output=True, text=True, timeout=1800)
+        files = [f for f in sorted(dst_dir.glob("source.*")) if not f.name.endswith(".part") and f.stat().st_size > 1000]
+        if r.returncode == 0 and files:
+            return files[0]
+        err = r.stderr[-400:]
+    raise RuntimeError("영상 링크에서 음성을 받지 못했습니다(yt-dlp). 영상 파일을 직접 올려 주세요: " + err)
