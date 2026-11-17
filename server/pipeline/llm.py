@@ -367,6 +367,6 @@ def build_feedback_request(*, level: str, problem: list[dict], problem_text: str
 def write_feedback(**kw) -> tuple[dict, dict]:
     system, content, used = build_feedback_request(**kw)
     fb, usage = _ask_json(model=config.FEEDBACK_MODEL, system=system, content=content,
-                          schema=FEEDBACK_SCHEMA, effort=config.FEEDBACK_EFFORT, max_tokens=64000, strict=False)
+                          schema=FEEDBACK_SCHEMA, effort=config.FEEDBACK_EFFORT, max_tokens=128000, strict=False)
     usage.update(used)
     return fb, usage
