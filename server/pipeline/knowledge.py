@@ -47,11 +47,18 @@ def _tokens(text: str) -> list[str]:
     return out
 
 
-@lru_cache(maxsize=1)
-def _book_pages() -> list[dict]:
+def _signature() -> tuple:
+    return tuple((f.name, f.stat().st_mtime) for f in sorted((config.KNOWLEDGE_DIR / "books").glob("*.txt")))
+
+
+@lru_cache(maxsize=2)
+def _book_pages(kind: str, sig: tuple) -> list[dict]:
+    """용도(lesson/interview)에 맞는 책만 읽어 색인한다. 책 파일이 바뀌면(sig) 다시 만든다."""
     pages = []
     for f in sorted((config.KNOWLEDGE_DIR / "books").glob("*.txt")):
         meta = book_meta(f.stem)
+        if kind not in meta["kinds"]:
+            continue
         parts = _PAGE.split("\n\n" + f.read_text(encoding="utf-8", errors="ignore"))
         for i in range(1, len(parts) - 1, 2):
             body = parts[i + 1].strip()
@@ -64,7 +71,7 @@ def _book_pages() -> list[dict]:
 
 def search_books(query: str, level: str, kind: str = "lesson", max_chars: int = 14000, top: int = 6) -> list[dict]:
     """BM25 로 문제와 관련된 쪽을 찾고, 앞뒤 쪽을 붙여 돌려준다."""
-    pool = [p for p in _book_pages() if kind in p["kinds"] and level in p["levels"]]
+    pool = [p for p in _book_pages(kind, _signature()) if level in p["levels"]]
     if not pool or not query.strip():
         return []
     qtok = Counter(_tokens(query))

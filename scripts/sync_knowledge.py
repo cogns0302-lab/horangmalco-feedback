@@ -112,11 +112,43 @@ def build(feedback_dir: Path, books_dir: Path) -> None:
     print(f"책 {m}권 정리 →", config.KNOWLEDGE_DIR)
 
 
+def sync_books_from_drive(raw: Path) -> None:
+    """책 PDF는 용량이 커서(권당 100~200MB) 한 권씩 받아 텍스트만 남기고 지운다."""
+    import gdown
+    import pymupdf
+    bk_dir = config.KNOWLEDGE_DIR / "books"
+    bk_dir.mkdir(parents=True, exist_ok=True)
+    raw.mkdir(parents=True, exist_ok=True)
+    for f in drive_walk(BOOKS_FOLDER):
+        if not f["path"].lower().endswith(".pdf"):
+            continue
+        out = bk_dir / (Path(f["path"]).stem + ".txt")
+        if out.exists() and out.stat().st_size > 0:
+            continue
+        print("책 받는 중:", f["path"], flush=True)
+        tmp = raw / "book.pdf"
+        tmp.unlink(missing_ok=True)
+        if not gdown.download(id=f["id"], output=str(tmp), quiet=True):
+            print("  받기 실패(공유 권한 또는 다운로드 한도 확인):", f["path"], flush=True)
+            continue
+        doc = pymupdf.open(tmp)
+        part = out.with_suffix(".part")
+        with part.open("w", encoding="utf-8") as o:
+            for i, pg in enumerate(doc):
+                o.write(f"\n\n===== p.{i + 1} =====\n" + pg.get_text())
+        if part.stat().st_size < len(doc) * 100:
+            print(f"  주의: '{f['path']}' 은 글자 인식(OCR)이 안 된 스캔본 같습니다.", flush=True)
+        doc.close()
+        part.replace(out)
+        tmp.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     if len(sys.argv) == 4 and sys.argv[1] == "--local":
         build(Path(sys.argv[2]), Path(sys.argv[3]))
     else:
         raw = config.DATA_DIR / "drive"
         drive_download(FEEDBACK_FOLDER, raw / "feedback", lambda p: p.lower().endswith((".hwp", ".hwpx")))
-        drive_download(BOOKS_FOLDER, raw / "books", lambda p: p.lower().endswith(".pdf"))
-        build(raw / "feedback", raw / "books")
+        build(raw / "feedback", raw / "no-local-books")
+        sync_books_from_drive(raw)
+        print("학습 자료 동기화 완료", flush=True)

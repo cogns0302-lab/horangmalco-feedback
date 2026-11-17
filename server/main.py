@@ -6,6 +6,8 @@ import hmac
 import json
 import re
 import secrets
+import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -58,6 +60,29 @@ def startup() -> None:
             db.run("INSERT INTO users(email,name,pw_hash,role,status,created_at) VALUES(?,?,?,?,?,?)",
                    config.ADMIN_EMAIL, "관리자", hash_pw(config.ADMIN_PASSWORD), "admin", "approved", time.time())
     jobs.start()
+    st = knowledge.status()
+    if config.SYNC_ON_START and not any(st["examples"].values()) and not st["books"]:
+        start_sync()                                  # 첫 배포: 드라이브에서 학습 자료를 받아 온다
+
+
+_sync_proc: subprocess.Popen | None = None
+SYNC_LOG = config.DATA_DIR / "sync.log"
+
+
+def start_sync() -> bool:
+    global _sync_proc
+    if _sync_proc and _sync_proc.poll() is None:
+        return False
+    log = SYNC_LOG.open("w", encoding="utf-8")
+    _sync_proc = subprocess.Popen([sys.executable, str(config.ROOT / "scripts" / "sync_knowledge.py")],
+                                  stdout=log, stderr=subprocess.STDOUT, cwd=config.ROOT)
+    return True
+
+
+def sync_state() -> dict:
+    running = bool(_sync_proc and _sync_proc.poll() is None)
+    tail = SYNC_LOG.read_text(encoding="utf-8", errors="ignore")[-1500:] if SYNC_LOG.exists() else ""
+    return {"running": running, "log": tail}
 
 
 @app.middleware("http")
@@ -416,7 +441,18 @@ async def lesson_create(request: Request):
 @app.get("/admin/users")
 def admin_users(request: Request):
     admin(request)
-    return page(request, "admin_users.html", users=db.q("SELECT * FROM users ORDER BY status='pending' DESC, created_at DESC"))
+    return page(request, "admin_users.html", users=db.q("SELECT * FROM users ORDER BY status='pending' DESC, created_at DESC"),
+                kb=knowledge.status(), sync=sync_state(), stt=stt.available(),
+                stt_names={k: v[0] for k, v in stt.PROVIDERS.items()},
+                ai_key=bool(config.env("ANTHROPIC_API_KEY") or config.env("ANTHROPIC_AUTH_TOKEN")))
+
+
+@app.post("/admin/knowledge/sync")
+def admin_sync(request: Request, csrf: str = Form("")):
+    admin(request)
+    check_csrf(request, csrf)
+    start_sync()
+    return RedirectResponse("/admin/users", status_code=303)
 
 
 @app.post("/admin/users/{user_id}/{action}")

@@ -25,5 +25,21 @@
   </tbody>
 </table>
 </div>
+
+<h2 class="section">서버 설정 상태</h2>
+<div class="card soft">
+  <ul class="plain">
+    <li>Claude API 키: {% if ai_key %}<span class="tag ok">설정됨</span>{% else %}<span class="tag bad">없음 (ANTHROPIC_API_KEY)</span>{% endif %}</li>
+    <li>음성 인식: {% if stt %}{% for s in stt %}<span class="tag ok">{{ stt_names[s] }}</span> {% endfor %}{% else %}<span class="tag bad">설정된 키 없음</span>{% endif %}</li>
+    <li>학습 자료: 스타일 가이드 {% if kb.style_guide %}<span class="tag ok">있음</span>{% else %}<span class="tag bad">없음</span>{% endif %}
+      · 피드백 예시 유특 {{ kb.examples['유특'] }} / 초특 {{ kb.examples['초특'] }} / 중특 {{ kb.examples['중특'] }}건 · 책 {{ kb.books|length }}권</li>
+  </ul>
+  <form method="post" action="/admin/knowledge/sync" data-confirm="구글 드라이브에서 피드백 문서와 책을 다시 받아 올까요? 새로 추가된 것만 받습니다(몇 분~수십 분).">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn small" {% if sync.running %}disabled{% endif %}>{% if sync.running %}드라이브에서 받는 중…{% else %}드라이브에서 학습 자료 다시 받기{% endif %}</button>
+  </form>
+  {% if sync.log %}<pre class="log">{{ sync.log }}</pre>{% endif %}
+  {% if kb.books %}<p class="muted">책: {{ kb.books | join(', ') }}</p>{% endif %}
+</div>
 {% endblock %}
 {% block scripts %}<script src="/static/app.js"></script>{% endblock %}

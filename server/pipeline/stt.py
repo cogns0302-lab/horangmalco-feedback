@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -71,25 +72,59 @@ def _rtzr(audio: Path, hints: list[str]) -> dict:
     raise RuntimeError("RTZR 전사 시간 초과")
 
 
-def _openai(audio: Path, hints: list[str]) -> dict:
-    # OpenAI 음성 전사. whisper-1 은 구간 타임스탬프를 주고, gpt-4o-transcribe 계열은 텍스트만 준다.
-    model = config.OPENAI_STT_MODEL
+def _whisper_compatible(audio: Path, hints: list[str], *, url: str, key: str, model: str) -> dict:
+    # OpenAI 형식의 전사 API. whisper 계열은 구간 타임스탬프를 주고, gpt-4o-transcribe 계열은 텍스트만 준다.
     data = [("model", model), ("language", "ko")]
     if hints:
-        data.append(("prompt", "특수교사 임용 2차 수업실연. " + ", ".join(hints[:60])))
-    if model.startswith("whisper"):
-        data += [("response_format", "verbose_json"), ("timestamp_granularities[]", "segment")]
+        # 프롬프트에 간투사를 넣어 두면 Whisper가 "음", "어"를 덜 지운다.
+        data.append(("prompt", "음, 어, 그, 자, 특수교사 임용 2차 수업 실연입니다. " + ", ".join(hints[:50])))
+    if "whisper" in model:
+        data += [("response_format", "verbose_json"), ("timestamp_granularities[]", "segment"),
+                 ("timestamp_granularities[]", "word"), ("temperature", "0")]
     else:
         data.append(("response_format", "json"))
     with audio.open("rb") as f:
-        r = requests.post("https://api.openai.com/v1/audio/transcriptions",
-                          headers={"Authorization": "Bearer " + config.OPENAI_API_KEY},
+        r = requests.post(url, headers={"Authorization": "Bearer " + key},
                           files={"file": (audio.name, f, "audio/mpeg")}, data=data, timeout=1800)
     r.raise_for_status()
     d = r.json()
     segs = [{"start": s["start"], "end": s["end"], "text": s["text"].strip()}
             for s in d.get("segments") or [] if s.get("text", "").strip()]
-    return {"segments": segs, "text": d.get("text", "")}
+    return {"segments": _by_sentence(segs, d.get("words") or []), "text": d.get("text", "")}
+
+
+def _by_sentence(segs: list[dict], words: list[dict]) -> list[dict]:
+    """Whisper 구간은 20~30초씩 묶이는 일이 많다. 단어 타임스탬프로 문장마다 시작 시각을 다시 잡는다."""
+    if not words:
+        return segs
+    out = []
+    for seg in segs:
+        sents = [x.strip() for x in re.split(r"(?<=[.?!])\s+", seg["text"]) if x.strip()]
+        if len(sents) <= 1:
+            out.append(seg)
+            continue
+        ws = [w for w in words if seg["start"] - 0.05 <= w["start"] < seg["end"] + 0.05]
+        total = sum(len(x.split()) for x in sents) or 1
+        pos = 0
+        for i, sent in enumerate(sents):
+            wi = min(len(ws) - 1, round(pos * len(ws) / total)) if ws else -1
+            start = ws[wi]["start"] if wi >= 0 else seg["start"] + (seg["end"] - seg["start"]) * pos / total
+            pos += len(sent.split())
+            wj = min(len(ws) - 1, max(wi, round(pos * len(ws) / total) - 1)) if ws else -1
+            end = ws[wj]["end"] if wj >= 0 else seg["end"]
+            out.append({"start": max(start, seg["start"]) if i else seg["start"], "end": end, "text": sent})
+    return out
+
+
+def _openai(audio: Path, hints: list[str]) -> dict:
+    return _whisper_compatible(audio, hints, url="https://api.openai.com/v1/audio/transcriptions",
+                               key=config.OPENAI_API_KEY, model=config.OPENAI_STT_MODEL)
+
+
+def _groq(audio: Path, hints: list[str]) -> dict:
+    # Groq 의 Whisper large-v3 (빠르고 저렴, 구간 타임스탬프 제공)
+    return _whisper_compatible(audio, hints, url="https://api.groq.com/openai/v1/audio/transcriptions",
+                               key=config.GROQ_API_KEY, model=config.GROQ_STT_MODEL)
 
 
 def _elevenlabs(audio: Path, hints: list[str]) -> dict:
@@ -132,6 +167,7 @@ def _elevenlabs(audio: Path, hints: list[str]) -> dict:
 PROVIDERS = {
     "clova": ("NAVER CLOVA Speech", _clova, lambda: bool(config.CLOVA_INVOKE_URL and config.CLOVA_SECRET)),
     "rtzr": ("리턴제로 VITO", _rtzr, lambda: bool(config.RTZR_CLIENT_ID and config.RTZR_CLIENT_SECRET)),
+    "groq": ("Groq Whisper", _groq, lambda: bool(config.GROQ_API_KEY)),
     "openai": ("OpenAI", _openai, lambda: bool(config.OPENAI_API_KEY)),
     "elevenlabs": ("ElevenLabs Scribe", _elevenlabs, lambda: bool(config.ELEVENLABS_API_KEY)),
 }
@@ -145,7 +181,7 @@ def transcribe_all(audio: Path, hints: list[str]) -> tuple[list[dict], dict[str,
     """설정된 모든 STT를 병렬 호출. (성공 결과 목록, {제공자: 오류}) 를 돌려준다."""
     names = available()
     if not names:
-        raise RuntimeError("STT API 키가 하나도 설정되어 있지 않습니다. .env 에 CLOVA/RTZR/OPENAI/ELEVENLABS 키 중 "
+        raise RuntimeError("STT API 키가 하나도 설정되어 있지 않습니다. .env 에 CLOVA/RTZR/GROQ/OPENAI/ELEVENLABS 키 중 "
                            "하나 이상을 넣어 주세요.")
     results, errors = [], {}
 

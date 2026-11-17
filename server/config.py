@@ -55,11 +55,13 @@ MERGE_MODEL = env("MERGE_MODEL", "claude-haiku-5-5")           # STT 결과 교�
 USE_FALLBACKS = env("USE_FALLBACKS", "1") == "1"
 
 # ── STT (키가 있는 것만 자동 사용) ─────────────────────────────────────────
-STT_PROVIDERS = [p.strip() for p in env("STT_PROVIDERS", "clova,rtzr,openai,elevenlabs").split(",") if p.strip()]
+STT_PROVIDERS = [p.strip() for p in env("STT_PROVIDERS", "clova,rtzr,groq,openai,elevenlabs").split(",") if p.strip()]
 CLOVA_INVOKE_URL = env("CLOVA_SPEECH_INVOKE_URL")
 CLOVA_SECRET = env("CLOVA_SPEECH_SECRET")
 RTZR_CLIENT_ID = env("RTZR_CLIENT_ID")
 RTZR_CLIENT_SECRET = env("RTZR_CLIENT_SECRET")
+GROQ_API_KEY = env("GROQ_API_KEY")
+GROQ_STT_MODEL = env("GROQ_STT_MODEL", "whisper-large-v3")
 OPENAI_API_KEY = env("OPENAI_API_KEY")
 OPENAI_STT_MODEL = env("OPENAI_STT_MODEL", "whisper-1")
 ELEVENLABS_API_KEY = env("ELEVENLABS_API_KEY")
@@ -67,3 +69,4 @@ ELEVENLABS_STT_MODEL = env("ELEVENLABS_STT_MODEL", "scribe_v2")
 
 KEEP_VIDEO = env("KEEP_VIDEO", "0") == "1"             # 음성 추출 후 원본 영상 보관 여부
 MAX_UPLOAD_MB = int(env("MAX_UPLOAD_MB", "4096"))
+SYNC_ON_START = env("SYNC_ON_START", "1") == "1"       # 학습 자료가 비어 있으면 시작할 때 드라이브에서 받기
