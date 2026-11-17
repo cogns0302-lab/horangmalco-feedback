@@ -32,6 +32,7 @@ BF_LABEL = 6      # 색 칸(항목)
 BF_HEAD = 5       # 색 칸(<2. 수업> 머리)
 
 REVIEW_MARK = "[2차 영상 검토]"
+PROMPT_BOX = "*학생 반응 유도 예시\n-심화 질문하기\n-한 번 더 기회 주기\n-힌트 제공하기\n-다른 학생에게 질문하기 등"
 
 _ids = iter(range(1_900_000_000, 2_100_000_000))
 
@@ -254,7 +255,10 @@ def build_body(fb: dict) -> str:
     for label, key in [("학생 수준 구분", "level_distinction"), ("학생 간 상호작용", "peer_interaction"),
                        ("확산적 발문 및 대답유도", "divergent_questions"), ("흥미/\n동기유발", "motivation"),
                        ("또래교수", "peer_tutoring"), ("자기평가\n동료평가", "assessment")]:
-        t.row(_label(label, 0), _body(part.get(key, ""), 1, cs=6))
+        text = part.get(key, "")
+        if key == "divergent_questions":                       # 틀에 고정으로 들어가는 안내 상자
+            text = (text.rstrip() + "\n\n" + PROMPT_BOX).strip()
+        t.row(_label(label, 0), _body(text, 1, cs=6))
     x.append(t.xml())
 
     # ── <4. 태도> ──────────────────────────────────────────────────────────
