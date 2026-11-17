@@ -138,3 +138,4 @@ a.who:hover { color: var(--accent); }
 dl.small-kv { grid-template-columns: 90px 1fr; margin-bottom: 8px; }
 
 [hidden] { display: none !important; }
+.offscreen { position: absolute !important; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
